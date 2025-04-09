@@ -962,7 +962,11 @@ function ChatRoom() {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          background: '#f0f0f0',
+          background: '#000',
+          backgroundImage: 'url(/bg.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
           fontFamily: '"Tahoma", sans-serif',
         }}
       >
@@ -1000,13 +1004,14 @@ function ChatRoom() {
             >
               <Box
                 component="img"
-                src="https://i.imgur.com/jTJ4b6C.png"
+                src="https://i.ibb.co/hxwVLpW9/meetme.png"
                 alt="Buzzed Icon"
                 sx={{ 
                   width: 15, 
                   height: 15,
                   mr: 0.5,
-                  mt: '-2px'
+                  mt: '-2px',
+                  objectFit: 'contain'
                 }}
               />
               BUZZED! MESSENGER - LOADING
@@ -1073,7 +1078,11 @@ function ChatRoom() {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          background: '#f0f0f0',
+          background: '#000',
+          backgroundImage: 'url(/bg.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
           fontFamily: '"Tahoma", sans-serif',
         }}
       >
@@ -1111,13 +1120,14 @@ function ChatRoom() {
             >
               <Box
                 component="img"
-                src="https://i.imgur.com/jTJ4b6C.png"
+                src="https://i.ibb.co/hxwVLpW9/meetme.png"
                 alt="Buzzed Icon"
                 sx={{ 
                   width: 15, 
                   height: 15,
                   mr: 0.5,
-                  mt: '-2px'
+                  mt: '-2px',
+                  objectFit: 'contain'
                 }}
               />
               BUZZED! MESSENGER - ERROR
@@ -1223,7 +1233,11 @@ function ChatRoom() {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          background: '#f0f0f0',
+          background: '#000',
+          backgroundImage: 'url(/bg.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
           fontFamily: '"Tahoma", sans-serif',
         }}
       >
@@ -1261,13 +1275,14 @@ function ChatRoom() {
             >
               <Box
                 component="img"
-                src="https://i.imgur.com/jTJ4b6C.png"
+                src="https://i.ibb.co/hxwVLpW9/meetme.png"
                 alt="Buzzed Icon"
                 sx={{ 
                   width: 15, 
                   height: 15,
                   mr: 0.5,
-                  mt: '-2px'
+                  mt: '-2px',
+                  objectFit: 'contain'
                 }}
               />
               BUZZED! MESSENGER - ERROR

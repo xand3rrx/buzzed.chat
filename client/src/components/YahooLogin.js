@@ -222,16 +222,17 @@ function YahooLogin({ socket }) {
           >
             <Box
               component="img"
-              src="https://i.imgur.com/jTJ4b6C.png"
-              alt="Yahoo Icon"
+              src="https://i.ibb.co/hxwVLpW9/meetme.png"
+              alt="Buzzed Icon"
               sx={{ 
                 width: 15, 
                 height: 15,
                 mr: 0.5,
-                mt: '-2px'
+                mt: '-2px',
+                objectFit: 'contain'
               }}
             />
-            BUZZED! MESSENGER
+            BUZZED! MESSENGER - LOGIN
           </Typography>
           <Box sx={{ display: 'flex', gap: 0.5 }}>
             <Box

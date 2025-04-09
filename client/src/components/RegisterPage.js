@@ -175,7 +175,11 @@ function RegisterPage({ socket }) {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        background: '#f0f0f0',
+        background: '#000',
+        backgroundImage: 'url(/bg.jpg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         fontFamily: '"Tahoma", sans-serif',
       }}
     >
@@ -186,6 +190,8 @@ function RegisterPage({ socket }) {
           borderRadius: 0,
           overflow: 'hidden',
           border: '1px solid #999',
+          boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.15)',
+          backgroundColor: 'white',
         }}
       >
         {/* Title bar */}
@@ -212,13 +218,14 @@ function RegisterPage({ socket }) {
           >
             <Box
               component="img"
-              src="https://i.imgur.com/jTJ4b6C.png"
-              alt="Yahoo Icon"
+              src="https://i.ibb.co/hxwVLpW9/meetme.png"
+              alt="Buzzed Icon"
               sx={{ 
                 width: 15, 
                 height: 15,
                 mr: 0.5,
-                mt: '-2px'
+                mt: '-2px',
+                objectFit: 'contain'
               }}
             />
             BUZZED! MESSENGER - REGISTER
