@@ -5,7 +5,6 @@ import LandingPage from './components/LandingPage';
 import ChatRoom from './components/ChatRoom';
 import YahooLogin from './components/YahooLogin';
 import RegisterPage from './components/RegisterPage';
-import SocketDebugger from './components/SocketDebugger';
 import { io } from 'socket.io-client';
 
 // Use environment variable with fallback to localhost for development
@@ -79,7 +78,6 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('loggedIn'));
   const [username, setUsername] = useState(localStorage.getItem('username') || '');
   const [socketConnected, setSocketConnected] = useState(socket.connected);
-  const [showDebugger, setShowDebugger] = useState(false); // State to toggle debugger
 
   useEffect(() => {
     if (!socket.connected) {
@@ -121,51 +119,37 @@ function App() {
     };
   }, [username]);
 
-  // Toggle debugger visibility
-  const toggleDebugger = () => {
-    setShowDebugger(prev => !prev);
-  };
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {/* Socket Debugger - can be toggled with Ctrl+D */}
-      {showDebugger && <SocketDebugger socket={socket} />}
-      <div onKeyDown={(e) => {
-        if (e.ctrlKey && e.key === 'd') {
-          e.preventDefault();
-          toggleDebugger();
-        }
-      }} tabIndex={0} style={{ outline: 'none', height: '100%' }}>
-        <Router>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<YahooLogin socket={socket} />} />
-            <Route path="/register" element={<RegisterPage socket={socket} />} />
-            
-            {/* Protected routes */}
-            <Route 
-              path="/" 
-              element={
-                <ProtectedRoute>
-                  <LandingPage socket={socket} />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/room/:roomId" 
-              element={
-                <ProtectedRoute>
-                  <ChatRoom socket={socket} />
-                </ProtectedRoute>
-              } 
-            />
-            
-            {/* Redirect to login for any other routes */}
-            <Route path="*" element={<Navigate to="/login" />} />
-          </Routes>
-        </Router>
-      </div>
+      <Router>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<YahooLogin socket={socket} />} />
+          <Route path="/register" element={<RegisterPage socket={socket} />} />
+          
+          {/* Protected routes */}
+          <Route 
+            path="/" 
+            element={
+              <ProtectedRoute>
+                <LandingPage socket={socket} />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/room/:roomId" 
+            element={
+              <ProtectedRoute>
+                <ChatRoom socket={socket} />
+              </ProtectedRoute>
+            } 
+          />
+          
+          {/* Redirect to login for any other routes */}
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      </Router>
     </ThemeProvider>
   );
 }
