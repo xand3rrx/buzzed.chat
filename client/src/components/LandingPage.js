@@ -24,7 +24,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import MinimizeIcon from '@mui/icons-material/Minimize';
 
-const socket = io('http://localhost:5000');
+// Use environment variable with fallback to localhost for development
+const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
+const socket = io(SOCKET_SERVER);
 
 function LandingPage() {
   const navigate = useNavigate();

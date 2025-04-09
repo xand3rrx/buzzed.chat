@@ -166,3 +166,36 @@ When someone clones your repository, they should:
 
 2. Create their own `.env` file based on the `.env.example` template
 3. Run the development servers for both client and server 
+
+### Vercel Deployment
+
+To properly deploy on Vercel:
+
+1. **Frontend Deployment (Client):**
+   - Deploy the repository root to Vercel
+   - Override build settings:
+     - Build Command: `cd client && npm install && npm run build`
+     - Output Directory: `build` (not `client/build`)
+   - Add the following environment variable in Vercel project settings:
+     - `REACT_APP_SOCKET_SERVER`: Your backend server URL (e.g., `https://your-backend-server.onrender.com`)
+
+2. **Backend Deployment (Server):**
+   - Deploy to a service like Render, Railway, or Heroku
+   - Add environment variables:
+     - `PORT`: `5000` (or whatever port your service uses)
+     - `MONGODB_URI`: Your MongoDB connection string
+   - Make sure to enable CORS for your Vercel frontend domain
+
+3. **Important CORS Configuration:**
+   - Update your server's CORS configuration to allow requests from your Vercel frontend domain
+   - In `server/index.js`, ensure your CORS settings include your Vercel domain
+
+```javascript
+const io = socketIO(server, {
+  cors: {
+    origin: ["https://your-vercel-app.vercel.app", "http://localhost:3000"],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+``` 

@@ -8,14 +8,11 @@ import RegisterPage from './components/RegisterPage';
 import SocketDebugger from './components/SocketDebugger';
 import { io } from 'socket.io-client';
 
-// Initialize socket connection with the proper server URL
-// The server is likely running on a different port (probably 5000)
-const socket = io('http://localhost:5000', {
-  reconnectionAttempts: 10,
+// Use environment variable with fallback to localhost for development
+const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
+const socket = io(SOCKET_SERVER, {
+  reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  timeout: 10000,
-  autoConnect: true,
-  forceNew: true,
 });
 
 // Protected route component to check if user is logged in

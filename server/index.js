@@ -6,14 +6,19 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*', // Allow requests from any origin
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: ["http://localhost:3000", process.env.FRONTEND_URL || "*"],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 

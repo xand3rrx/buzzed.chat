@@ -40,14 +40,14 @@ import io from 'socket.io-client';
 import UserMenu from './UserMenu';
 import RoomCustomizationPanel from './RoomCustomizationPanel';
 import MentionsPopup from './MentionsPopup.jsx';
+import { styled, useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
 
-// Configure socket with reconnection parameters
-const socket = io('http://localhost:5000', {
-  reconnection: true,
+// Use environment variable with fallback to localhost for development
+const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
+const socket = io(SOCKET_SERVER, {
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  timeout: 20000,
 });
 
 // Generate a 3D starfield box shadow string
