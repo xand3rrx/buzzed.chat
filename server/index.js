@@ -7,8 +7,8 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors({
-  origin: '*', // Allow requests from any origin
-  methods: ['GET', 'POST'],
+  origin: ['http://107.174.83.49', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
 app.use(express.json());
@@ -16,8 +16,8 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: ["http://localhost:3000", process.env.FRONTEND_URL || "*"],
-    methods: ["GET", "POST"],
+    origin: ['http://107.174.83.49', 'http://localhost:3000'],
+    methods: ["GET", "POST", "OPTIONS"],
     credentials: true
   }
 });
