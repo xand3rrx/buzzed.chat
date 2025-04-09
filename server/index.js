@@ -7,7 +7,7 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors({
-  origin: ['http://107.174.83.49', 'http://localhost:3000'],
+  origin: ['https://buzzed.chat', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
@@ -16,7 +16,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: ['http://107.174.83.49', 'http://localhost:3000'],
+    origin: ['https://buzzed.chat', 'http://localhost:3000'],
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true
   }
