@@ -23,10 +23,21 @@ import ChatIcon from '@mui/icons-material/Chat';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import MinimizeIcon from '@mui/icons-material/Minimize';
+import DOMPurify from 'dompurify';
 
 // Use environment variable with fallback to localhost for development
 const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
 const socket = io(SOCKET_SERVER);
+
+// Function to sanitize text
+const sanitizeText = (text) => {
+  // First use DOMPurify to clean the HTML
+  const cleanHtml = DOMPurify.sanitize(text);
+  // Then extract just the text content to remove any remaining HTML
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = cleanHtml;
+  return tempDiv.textContent || tempDiv.innerText || '';
+};
 
 function LandingPage() {
   const navigate = useNavigate();
@@ -36,6 +47,8 @@ function LandingPage() {
   const [username, setUsername] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [recentRooms, setRecentRooms] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [createRoomError, setCreateRoomError] = useState('');
 
   useEffect(() => {
     // Add Atkinson Hyperlegible font
@@ -85,11 +98,28 @@ function LandingPage() {
       setRooms(roomsList);
     });
 
+    socket.on('command_error', (data) => {
+      setCreateRoomError(data.message);
+    });
+
     socket.on('room_created', (newRoom) => {
       console.log('Room created:', newRoom);
       setRooms(prevRooms => [...prevRooms, newRoom]);
-      // Add to recent rooms
       addToRecentRooms(newRoom);
+      setCreateRoomError(''); // Clear any previous errors
+    });
+
+    // Handle room deletion
+    socket.on('room_deleted', (data) => {
+      console.log('Room deleted:', data);
+      // Remove the room from the rooms list
+      setRooms(prevRooms => prevRooms.filter(room => room._id !== data.roomId));
+      // Remove from recent rooms
+      setRecentRooms(prevRooms => prevRooms.filter(room => room._id !== data.roomId));
+      // Update localStorage
+      localStorage.setItem('recentRooms', JSON.stringify(
+        recentRooms.filter(room => room._id !== data.roomId)
+      ));
     });
 
     socket.on('error', (error) => {
@@ -104,7 +134,9 @@ function LandingPage() {
       socket.off('login_successful');
       socket.off('rooms_list');
       socket.off('room_created');
+      socket.off('room_deleted');
       socket.off('error');
+      socket.off('command_error');
       document.head.removeChild(link);
     };
   }, []);
@@ -120,11 +152,15 @@ function LandingPage() {
   };
 
   const handleCreateRoom = () => {
-    if (newRoomName.trim()) {
-      console.log('Creating room:', newRoomName.trim());
-      socket.emit('create_room', newRoomName.trim());
+    const sanitizedRoomName = sanitizeText(newRoomName.trim());
+    if (sanitizedRoomName) {
+      if (sanitizedRoomName.length > 30) {
+        setCreateRoomError('Room name cannot be longer than 30 characters.');
+        return;
+      }
+      console.log('Creating room:', sanitizedRoomName);
+      socket.emit('create_room', sanitizedRoomName);
       setNewRoomName('');
-      setShowCreateForm(false);
     }
   };
 
@@ -136,7 +172,7 @@ function LandingPage() {
 
   // Filter rooms based on search query
   const filteredRooms = rooms.filter(room =>
-    room.name.toLowerCase().includes(searchQuery.toLowerCase())
+    sanitizeText(room.name).toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Get user's active/recent rooms first
@@ -279,73 +315,169 @@ function LandingPage() {
         {/* Create room form */}
         {showCreateForm && (
           <Box sx={{
-            p: 2,
-            bgcolor: '#f7eefb',
-            borderBottom: '1px solid #b57ad9',
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '300px',
+            bgcolor: '#ffffff',
+            border: '1px solid #770094',
+            boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.35)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
           }}>
-            <Typography
+            {/* Windows-style title bar with gradient */}
+            <Box 
               sx={{ 
-                fontSize: '12px',
-                fontWeight: 'bold',
-                mb: 1,
-                fontFamily: '"Tahoma", sans-serif',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                color: '#fff',
+                height: '24px',
+                px: 0.5,
+                userSelect: 'none',
               }}
             >
-              Create New Chat Room
-            </Typography>
-            <Box sx={{ 
-              display: 'flex',
-              gap: 1,
-              alignItems: 'center'
-            }}>
+              <Typography 
+                sx={{ 
+                  fontSize: '12px', 
+                  fontWeight: 'bold',
+                  fontFamily: '"Tahoma", sans-serif',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                }}
+              >
+                <AddIcon sx={{ fontSize: '14px' }} />
+                Create New Room
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setCreateRoomError('');
+                  }}
+                  sx={{ 
+                    padding: 0,
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: 0,
+                    bgcolor: '#f0d5ff',
+                    border: '1px solid #770094',
+                    '&:hover': {
+                      bgcolor: '#f9e5ff',
+                    },
+                  }}
+                >
+                  <CloseIcon sx={{ fontSize: '12px', color: '#000' }} />
+                </IconButton>
+              </Box>
+            </Box>
+
+            {/* Form content */}
+            <Box sx={{ p: 2 }}>
+              <Typography sx={{
+                fontSize: '11px',
+                fontFamily: '"Tahoma", sans-serif',
+                color: '#666',
+                mb: 1.5,
+              }}>
+                Enter a name for your new chat room:
+              </Typography>
+
               <TextField
                 fullWidth
                 size="small"
                 value={newRoomName}
-                onChange={(e) => setNewRoomName(e.target.value)}
-                placeholder="Room name"
-                variant="outlined"
+                onChange={(e) => {
+                  setNewRoomName(e.target.value);
+                  setCreateRoomError('');
+                }}
+                placeholder="Enter room name..."
+                inputProps={{
+                  maxLength: 30,
+                }}
+                helperText={createRoomError || `${newRoomName.length}/30 characters`}
+                error={!!createRoomError}
+                FormHelperTextProps={{
+                  sx: {
+                    fontSize: '11px',
+                    fontFamily: '"Tahoma", sans-serif',
+                    mt: 0.5,
+                    color: createRoomError ? '#d32f2f' : 'inherit',
+                  }
+                }}
                 sx={{
+                  mb: 2,
                   '& .MuiOutlinedInput-root': {
-                    height: '30px',
                     fontSize: '12px',
-                    backgroundColor: '#ffffff',
                     fontFamily: '"Tahoma", sans-serif',
                   },
                 }}
               />
-              <Button
-                variant="contained"
-                onClick={handleCreateRoom}
-                disabled={!newRoomName.trim()}
-                sx={{
-                  textTransform: 'none',
-                  fontSize: '12px',
-                  py: 0.5,
-                  minWidth: '60px',
-                  backgroundColor: '#770094',
-                  '&:hover': {
-                    backgroundColor: '#5c0073',
-                  },
-                  '&.Mui-disabled': {
-                    backgroundColor: '#cccccc',
-                  },
-                  fontFamily: '"Tahoma", sans-serif',
+
+              {/* Footer with buttons */}
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'flex-end', 
+                  gap: 1,
+                  borderTop: '1px solid #e0e0e0',
+                  pt: 2,
                 }}
               >
-                Create
-              </Button>
-              <IconButton
-                size="small"
-                onClick={() => setShowCreateForm(false)}
-                sx={{
-                  width: '24px',
-                  height: '24px',
-                  color: '#666',
-                }}
-              >
-                <CloseIcon fontSize="small" />
-              </IconButton>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setCreateRoomError('');
+                  }}
+                  sx={{
+                    fontSize: '11px',
+                    fontFamily: '"Tahoma", sans-serif',
+                    textTransform: 'none',
+                    color: '#000000',
+                    background: 'linear-gradient(to bottom, #ffffff 0%, #e3e3e3 100%)',
+                    border: '1px solid #b3b3b3',
+                    borderRadius: '3px',
+                    px: 2,
+                    '&:hover': {
+                      background: 'linear-gradient(to bottom, #ffffff 0%, #f2f2f2 100%)',
+                      borderColor: '#999999',
+                    },
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="small"
+                  onClick={handleCreateRoom}
+                  disabled={!newRoomName.trim() || newRoomName.length > 30 || !!createRoomError}
+                  sx={{
+                    fontSize: '11px',
+                    fontFamily: '"Tahoma", sans-serif',
+                    textTransform: 'none',
+                    background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                    border: '1px solid #770094',
+                    borderRadius: '3px',
+                    color: '#ffffff',
+                    px: 2,
+                    '&:hover': {
+                      background: 'linear-gradient(to bottom, #b44dd1 0%, #8f00b3 100%)',
+                    },
+                    '&.Mui-disabled': {
+                      background: 'linear-gradient(to bottom, #e0e0e0 0%, #d0d0d0 100%)',
+                      border: '1px solid #cccccc',
+                      color: '#999999',
+                    },
+                  }}
+                >
+                  Create Room
+                </Button>
+              </Box>
             </Box>
           </Box>
         )}
@@ -355,7 +487,6 @@ function LandingPage() {
           p: 2,
           bgcolor: '#ffffff',
           borderBottom: '1px solid #e0e0e0',
-          mb: 1,
         }}>
           <Box sx={{ 
             display: 'flex',
@@ -390,6 +521,7 @@ function LandingPage() {
             flex: 1,
             overflow: 'auto',
             bgcolor: '#ffffff',
+            maxHeight: 'calc(100vh - 300px)',
             '&::-webkit-scrollbar': {
               width: '16px',
             },
@@ -419,7 +551,9 @@ function LandingPage() {
                   color: '#6689bc',
                   bgcolor: '#f0f5fa',
                   borderBottom: '1px solid #e0e0e0',
-                  mt: 1,
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1,
                 }}
               >
                 Active Rooms
@@ -448,11 +582,11 @@ function LandingPage() {
                           fontSize: '14px',
                         }}
                       >
-                        {room.name.charAt(0).toUpperCase()}
+                        {sanitizeText(room.name).charAt(0).toUpperCase()}
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
-                      primary={room.name}
+                      primary={sanitizeText(room.name)}
                       secondary={room.owner === username ? "You own this room" : null}
                       primaryTypographyProps={{
                         fontSize: '13px',
@@ -500,6 +634,9 @@ function LandingPage() {
               borderBottom: '1px solid #e0e0e0',
               borderTop: activeRooms.length > 0 ? '1px solid #e0e0e0' : 'none',
               mt: 1,
+              position: 'sticky',
+              top: activeRooms.length > 0 ? '40px' : '0',
+              zIndex: 1,
             }}
           >
             Available Rooms
@@ -529,11 +666,11 @@ function LandingPage() {
                         fontSize: '14px',
                       }}
                     >
-                      {room.name.charAt(0).toUpperCase()}
+                      {sanitizeText(room.name).charAt(0).toUpperCase()}
                     </Avatar>
                   </ListItemAvatar>
                   <ListItemText
-                    primary={room.name}
+                    primary={sanitizeText(room.name)}
                     secondary={room.owner === username ? "You own this room" : null}
                     primaryTypographyProps={{
                       fontSize: '13px',

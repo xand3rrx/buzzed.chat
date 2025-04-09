@@ -1,10 +1,16 @@
 const mongoose = require('mongoose');
 
+// Create a case-insensitive index on the name field
 const roomSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    unique: true
+    maxlength: [30, 'Room name cannot be longer than 30 characters'],
+    trim: true,
+    index: {
+      unique: true,
+      collation: { locale: 'en', strength: 2 }
+    }
   },
   createdAt: {
     type: Date,
@@ -30,4 +36,4 @@ const roomSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('Room', roomSchema); 
+module.exports = mongoose.model('Room', roomSchema, 'rooms'); 

@@ -4,6 +4,8 @@ const socketIO = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+const createDOMPurify = require('dompurify');
+const { JSDOM } = require('jsdom');
 
 const app = express();
 app.use(cors({
@@ -31,6 +33,20 @@ mongoose.connect(process.env.MONGODB_URI)
 const Room = require('./models/Room');
 const Message = require('./models/Message');
 const User = require('./models/User');
+
+const window = new JSDOM('').window;
+const DOMPurify = createDOMPurify(window);
+
+// Function to sanitize text
+const sanitizeText = (text) => {
+  if (!text) return '';
+  // First use DOMPurify to clean the HTML
+  const cleanHtml = DOMPurify.sanitize(text);
+  // Then extract just the text content to remove any remaining HTML
+  const tempDiv = window.document.createElement('div');
+  tempDiv.innerHTML = cleanHtml;
+  return tempDiv.textContent || tempDiv.innerText || '';
+};
 
 // Generate random username
 const generateUsername = () => {
@@ -72,17 +88,19 @@ io.on('connection', (socket) => {
   socket.on('change_username', async (data) => {
     console.log(`User changing username from ${socketUsername} to ${data.newUsername}`);
     
+    const sanitizedNewUsername = sanitizeText(data.newUsername);
+    
     // Check if this is a registered user by checking localStorage flag sent from client
     const isRegisteredUser = data.isRegistered || false;
     
     // If not a registered user, check if the requested username is already registered
     if (!isRegisteredUser) {
       try {
-        const existingUser = await User.findOne({ username: data.newUsername });
+        const existingUser = await User.findOne({ username: sanitizedNewUsername });
         
         if (existingUser) {
           return socket.emit('command_error', { 
-            message: `Username "${data.newUsername}" is already registered by another user.` 
+            message: `Username "${sanitizedNewUsername}" is already registered by another user.` 
           });
         }
       } catch (error) {
@@ -92,47 +110,99 @@ io.on('connection', (socket) => {
     
     // Update the socket username
     const oldUsername = socketUsername;
-    socketUsername = data.newUsername;
+    socketUsername = sanitizedNewUsername;
     
     // Update username in the socketUsers map
-    socketUsers.set(socket.id, data.newUsername);
+    socketUsers.set(socket.id, sanitizedNewUsername);
     
     // Emit event to confirm the change
     socket.emit('username_changed', { 
       oldUsername, 
-      newUsername: data.newUsername 
+      newUsername: sanitizedNewUsername 
     });
+  });
+
+  // Create room
+  socket.on('create_room', async (roomName) => {
+    try {
+      const sanitizedRoomName = sanitizeText(roomName);
+      
+      // Check room name length
+      if (!sanitizedRoomName || sanitizedRoomName.length > 30) {
+        return socket.emit('command_error', { 
+          message: 'Room name must be between 1 and 30 characters long.' 
+        });
+      }
+
+      // Check if room name already exists (case-insensitive)
+      const existingRoom = await Room.findOne({ 
+        name: sanitizedRoomName 
+      }).collation({ locale: 'en', strength: 2 });
+
+      if (existingRoom) {
+        return socket.emit('command_error', { 
+          message: `A room with this name already exists (names are case-insensitive). "${existingRoom.name}" is already in use.` 
+        });
+      }
+      
+      console.log('Creating room:', sanitizedRoomName);
+      const newRoom = await Room.create({ 
+        name: sanitizedRoomName,
+        owner: socketUsername 
+      });
+      console.log('Room created successfully:', newRoom);
+      io.emit('room_created', newRoom);
+      // Also emit rooms_list to update all clients
+      const rooms = await Room.find();
+      io.emit('rooms_list', rooms);
+    } catch (error) {
+      if (error.code === 11000) {
+        // Handle duplicate key error
+        return socket.emit('command_error', { 
+          message: 'A room with this name already exists (names are case-insensitive).' 
+        });
+      }
+      console.error('Error creating room:', error);
+      socket.emit('error', { message: 'Failed to create room' });
+    }
   });
 
   // Register username with password
   socket.on('register_username', async (data) => {
     try {
-      // Check if username is already registered
-      const existingUser = await User.findOne({ username: data.username });
+      const sanitizedUsername = sanitizeText(data.username);
+      
+      // Check if username is already registered (case-insensitive)
+      const existingUser = await User.findOne({ 
+        usernameLower: sanitizedUsername.toLowerCase() 
+      });
       
       if (existingUser) {
         return socket.emit('command_error', { 
-          message: `Username "${data.username}" is already registered.` 
+          message: `Username "${sanitizedUsername}" is already registered (usernames are case-insensitive).` 
         });
       }
       
       // Create new user
-      const newUser = new User({ username: data.username });
+      const newUser = new User({ 
+        username: sanitizedUsername,
+        usernameLower: sanitizedUsername.toLowerCase()
+      });
       newUser.setPassword(data.password);
       await newUser.save();
       
       // Update the socket username
       const oldUsername = socketUsername;
-      socketUsername = data.username;
+      socketUsername = sanitizedUsername;
       
       // Update username in the socketUsers map
-      socketUsers.set(socket.id, data.username);
+      socketUsers.set(socket.id, sanitizedUsername);
       
-      console.log(`Username "${data.username}" registered successfully`);
-      socket.emit('username_registered', { username: data.username });
+      console.log(`Username "${sanitizedUsername}" registered successfully`);
+      socket.emit('username_registered', { username: sanitizedUsername });
       
       // Emit register_success event for authentication tracking
-      socket.emit('register_success', { username: data.username });
+      socket.emit('register_success', { username: sanitizedUsername });
     } catch (error) {
       console.error('Error registering username:', error);
       socket.emit('command_error', { 
@@ -144,12 +214,16 @@ io.on('connection', (socket) => {
   // Login with username and password
   socket.on('login_username', async (data) => {
     try {
-      // Find the user
-      const user = await User.findOne({ username: data.username });
+      const sanitizedUsername = sanitizeText(data.username);
+      
+      // Find the user (case-insensitive)
+      const user = await User.findOne({ 
+        usernameLower: sanitizedUsername.toLowerCase() 
+      });
       
       if (!user) {
         return socket.emit('command_error', { 
-          message: `Username "${data.username}" is not registered.` 
+          message: `Username "${sanitizedUsername}" is not registered.` 
         });
       }
       
@@ -160,18 +234,18 @@ io.on('connection', (socket) => {
         });
       }
       
-      // Update the socket username
+      // Update the socket username with the exact case from the database
       const oldUsername = socketUsername;
-      socketUsername = data.username;
+      socketUsername = user.username; // Use the case from the database
       
       // Update username in the socketUsers map
-      socketUsers.set(socket.id, data.username);
+      socketUsers.set(socket.id, user.username);
       
-      console.log(`User logged in as "${data.username}"`);
-      socket.emit('login_successful', { username: data.username });
+      console.log(`User logged in as "${user.username}"`);
+      socket.emit('login_successful', { username: user.username });
       
       // Emit login_success event for authentication tracking
-      socket.emit('login_success', { username: data.username });
+      socket.emit('login_success', { username: user.username });
     } catch (error) {
       console.error('Error logging in:', error);
       socket.emit('command_error', { 
@@ -229,25 +303,6 @@ io.on('connection', (socket) => {
     }
   }
 
-  // Create room
-  socket.on('create_room', async (roomName) => {
-    try {
-      console.log('Creating room:', roomName);
-      const newRoom = await Room.create({ 
-        name: roomName,
-        owner: socketUsername 
-      });
-      console.log('Room created successfully:', newRoom);
-      io.emit('room_created', newRoom);
-      // Also emit rooms_list to update all clients
-      const rooms = await Room.find();
-      io.emit('rooms_list', rooms);
-    } catch (error) {
-      console.error('Error creating room:', error);
-      socket.emit('error', { message: 'Failed to create room' });
-    }
-  });
-
   // Update room customization
   socket.on('update_room_customization', async (data) => {
     try {
@@ -299,7 +354,7 @@ io.on('connection', (socket) => {
       const messageData = {
         roomId: data.roomId,
         username: socketUsername,
-        content: data.content,
+        content: sanitizeText(data.content),
         textColor: data.textColor || '#000000'
       };
 
@@ -307,8 +362,8 @@ io.on('connection', (socket) => {
       if (data.replyTo) {
         messageData.replyTo = {
           _id: data.replyTo._id,
-          username: data.replyTo.username,
-          content: data.replyTo.content
+          username: sanitizeText(data.replyTo.username),
+          content: sanitizeText(data.replyTo.content)
         };
       }
 
@@ -426,6 +481,57 @@ io.on('connection', (socket) => {
       console.error('Error deleting message:', error);
       socket.emit('command_error', { 
         message: 'Failed to delete message. Please try again.' 
+      });
+    }
+  });
+
+  // Delete room (only for room owner or admin user 'xand3rr')
+  socket.on('delete_room', async (data) => {
+    try {
+      const { roomId } = data;
+      
+      // Find the room
+      const room = await Room.findById(roomId);
+      
+      if (!room) {
+        return socket.emit('command_error', { 
+          message: 'Room not found' 
+        });
+      }
+      
+      // Check if the user is the room owner or the admin user 'xand3rr'
+      const isAdmin = socketUsername === 'xand3rr';
+      if (room.owner !== socketUsername && !isAdmin) {
+        return socket.emit('command_error', { 
+          message: 'Only the room owner can delete the room' 
+        });
+      }
+      
+      // Delete all messages associated with the room
+      await Message.deleteMany({ roomId });
+      
+      // Delete the room
+      await Room.findByIdAndDelete(roomId);
+      
+      // Notify all users that the room has been deleted
+      io.emit('room_deleted', { 
+        roomId,
+        deletedBy: socketUsername
+      });
+      
+      // Send success response to the user who deleted the room
+      socket.emit('delete_room_response', { 
+        success: true, 
+        roomId,
+        isAdmin
+      });
+      
+      // Log the deletion with admin flag if applicable
+      console.log(`Room ${roomId} deleted by ${isAdmin ? 'admin' : 'room owner'} ${socketUsername}`);
+    } catch (error) {
+      console.error('Error deleting room:', error);
+      socket.emit('command_error', { 
+        message: 'Failed to delete room. Please try again.' 
       });
     }
   });

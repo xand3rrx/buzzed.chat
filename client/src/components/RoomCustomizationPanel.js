@@ -24,6 +24,8 @@ import MaximizeIcon from '@mui/icons-material/CropSquare';
 import LinkIcon from '@mui/icons-material/Link';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ChatIcon from '@mui/icons-material/Chat';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import WarningIcon from '@mui/icons-material/Warning';
 
 // Example space backgrounds and cursors for quick selection
 const backgroundOptions = [
@@ -55,6 +57,7 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
   const [previewBackground, setPreviewBackground] = useState('');
   const [previewCursor, setPreviewCursor] = useState('');
   const [previewChatBackground, setPreviewChatBackground] = useState('');
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   
   const handleCloseDialog = () => {
     setDialogOpen(false);
@@ -129,6 +132,11 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
     } else if (type === 'chatBackground' && customChatBackgroundUrl) {
       setPreviewChatBackground(customChatBackgroundUrl);
     }
+  };
+  
+  const handleDeleteRoom = () => {
+    socket.emit('delete_room', { roomId });
+    handleCloseDialog();
   };
   
   // Listen for room data to initialize previews
@@ -345,6 +353,40 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
                 </ListItemIcon>
                 <ListItemText 
                   primary="Custom Cursor" 
+                  primaryTypographyProps={{
+                    fontSize: '11px',
+                    fontFamily: '"Tahoma", sans-serif',
+                    color: '#000',
+                  }}
+                />
+              </ListItem>
+              
+              <ListItem 
+                button 
+                selected={activeTab === 2}
+                onClick={() => handleTabChange(2)}
+                sx={{ 
+                  paddingY: '6px',
+                  paddingX: '8px',
+                  minHeight: '32px',
+                  borderBottom: '1px solid #e9d9ef',
+                  bgcolor: activeTab === 2 ? '#dcc4e9' : 'transparent',
+                  '&:hover': {
+                    bgcolor: '#e7d3f1',
+                  },
+                  '&.Mui-selected': {
+                    bgcolor: '#dcc4e9',
+                    '&:hover': {
+                      bgcolor: '#dcc4e9',
+                    },
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: '28px' }}>
+                  <SettingsIcon sx={{ fontSize: '16px', color: '#5c0057' }} />
+                </ListItemIcon>
+                <ListItemText 
+                  primary="Room Management" 
                   primaryTypographyProps={{
                     fontSize: '11px',
                     fontFamily: '"Tahoma", sans-serif',
@@ -723,6 +765,78 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
                 )}
               </Box>
             )}
+            
+            {/* Room Management Tab Content */}
+            {activeTab === 2 && (
+              <Box>
+                <Box sx={{ 
+                  mb: 2,
+                  pb: 1,
+                  borderBottom: '1px solid #c094ca'
+                }}>
+                  <Typography variant="subtitle1" sx={{ fontFamily: '"Tahoma", sans-serif', fontSize: '13px', fontWeight: 'bold', color: '#5c0057' }}>
+                    Room Management
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: '"Tahoma", sans-serif', fontSize: '11px', color: '#333' }}>
+                    Manage your chat room settings and permissions.
+                  </Typography>
+                </Box>
+                
+                <Box sx={{ 
+                  backgroundColor: '#f0e5f8',
+                  border: '1px solid #c094ca',
+                  borderRadius: '3px',
+                  p: 2,
+                  mb: 3
+                }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1, fontFamily: '"Tahoma", sans-serif', fontSize: '11px', fontWeight: 'bold', color: '#d32f2f' }}>
+                    Danger Zone
+                  </Typography>
+                  
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between',
+                    backgroundColor: '#ffebee',
+                    border: '1px solid #ffcdd2',
+                    borderRadius: '3px',
+                    p: 2,
+                    mb: 2
+                  }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <WarningIcon sx={{ color: '#d32f2f', mr: 1 }} />
+                      <Box>
+                        <Typography sx={{ fontSize: '11px', fontWeight: 'bold', fontFamily: '"Tahoma", sans-serif' }}>
+                          Delete Room
+                        </Typography>
+                        <Typography sx={{ fontSize: '10px', color: '#666', fontFamily: '"Tahoma", sans-serif' }}>
+                          This action cannot be undone. All messages and settings will be permanently deleted.
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Button
+                      onClick={() => setShowDeleteConfirmation(true)}
+                      startIcon={<DeleteForeverIcon />}
+                      sx={{
+                        fontSize: '11px',
+                        fontFamily: '"Tahoma", sans-serif',
+                        background: 'linear-gradient(to bottom, #ff5252 0%, #d32f2f 100%)',
+                        border: '1px solid #b71c1c',
+                        borderRadius: '3px',
+                        color: '#fff',
+                        textTransform: 'none',
+                        px: 2,
+                        '&:hover': {
+                          background: 'linear-gradient(to bottom, #ff6b6b 0%, #e53935 100%)',
+                        }
+                      }}
+                    >
+                      Delete Room
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
+            )}
           </Box>
         </Box>
         
@@ -771,6 +885,76 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
           >
             Apply Settings
           </Button>
+        </Box>
+      </Dialog>
+      
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={showDeleteConfirmation}
+        onClose={() => setShowDeleteConfirmation(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: '#f5eef8',
+            color: '#000',
+            borderRadius: '0',
+            overflow: 'hidden',
+            boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #770094',
+            maxWidth: '400px',
+          }
+        }}
+      >
+        <Box sx={{ p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <WarningIcon sx={{ color: '#d32f2f', mr: 1 }} />
+            <Typography sx={{ fontSize: '13px', fontWeight: 'bold', fontFamily: '"Tahoma", sans-serif' }}>
+              Delete Room Confirmation
+            </Typography>
+          </Box>
+          
+          <Typography sx={{ fontSize: '11px', fontFamily: '"Tahoma", sans-serif', mb: 3 }}>
+            Are you sure you want to delete this room? This action cannot be undone. All messages and settings will be permanently deleted.
+          </Typography>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button
+              onClick={() => setShowDeleteConfirmation(false)}
+              sx={{
+                fontSize: '11px',
+                fontFamily: '"Tahoma", sans-serif',
+                background: 'linear-gradient(to bottom, #ffffff 0%, #f0f0f0 100%)',
+                border: '1px solid #a1009c',
+                borderRadius: '3px',
+                color: '#000',
+                textTransform: 'none',
+                px: 2,
+                '&:hover': {
+                  background: 'linear-gradient(to bottom, #ffffff 0%, #e9e9e9 100%)',
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteRoom}
+              startIcon={<DeleteForeverIcon />}
+              sx={{
+                fontSize: '11px',
+                fontFamily: '"Tahoma", sans-serif',
+                background: 'linear-gradient(to bottom, #ff5252 0%, #d32f2f 100%)',
+                border: '1px solid #b71c1c',
+                borderRadius: '3px',
+                color: '#fff',
+                textTransform: 'none',
+                px: 2,
+                '&:hover': {
+                  background: 'linear-gradient(to bottom, #ff6b6b 0%, #e53935 100%)',
+                }
+              }}
+            >
+              Delete Room
+            </Button>
+          </Box>
         </Box>
       </Dialog>
     </>

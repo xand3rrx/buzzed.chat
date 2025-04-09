@@ -219,9 +219,12 @@ function ChatRoom() {
   const [newMessage, setNewMessage] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(true);
+  const [switchingRoom, setSwitchingRoom] = useState(false);
   const [error, setError] = useState(null);
   const [isRoomOwner, setIsRoomOwner] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
+  const [characterCount, setCharacterCount] = useState(0);
+  const MAX_MESSAGE_LENGTH = 600;
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
@@ -255,6 +258,10 @@ function ChatRoom() {
     link.rel = 'stylesheet';
     link.href = 'https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&family=Ubuntu+Mono&display=swap';
     document.head.appendChild(link);
+    
+    // Set loading state when room changes
+    setSwitchingRoom(true);
+    setMessages([]); // Clear messages when switching rooms
     
     // Check if username exists in localStorage
     const storedUsername = localStorage.getItem('chatUsername');
@@ -292,53 +299,56 @@ function ChatRoom() {
     }
 
     socket.on('load_messages', (loadedMessages) => {
-      console.log("Loaded messages:", loadedMessages);
       setMessages(loadedMessages);
+      setSwitchingRoom(false);
       setTimeout(scrollToBottom, 200);
     });
 
     socket.on('receive_message', (message) => {
-      console.log("Received message with color:", message.textColor);
-      setMessages((prevMessages) => [...prevMessages, message]);
-      // Add user to active users when they send a message
-      if (!message.isSystemMessage) {
-        setActiveUsers(prev => new Set([...prev, message.username]));
-      }
-      
-      // Check if current user was mentioned or replied to
-      if (message.username !== username) {
-        // Check for @mentions in the message
-        if (message.content.includes(`@${username}`)) {
-          const newNotification = {
-            id: Date.now(),
-            type: 'mention',
-            message: `${message.username} mentioned you`,
-            content: message.content,
-            timestamp: new Date(),
-            messageId: message._id,
-          };
-          setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Keep most recent 50
-          setNotificationCount(prev => prev + 1);
-          playNotificationSound();
+      // Only process messages for the current room
+      if (message.roomId === roomId) {
+        console.log("Received message with color:", message.textColor);
+        setMessages((prevMessages) => [...prevMessages, message]);
+        // Add user to active users when they send a message
+        if (!message.isSystemMessage) {
+          setActiveUsers(prev => new Set([...prev, message.username]));
         }
         
-        // Check if message is a reply to the current user
-        if (message.replyTo && message.replyTo.username === username) {
-          const newNotification = {
-            id: Date.now(),
-            type: 'reply',
-            message: `${message.username} replied to your message`,
-            content: message.content,
-            timestamp: new Date(),
-            messageId: message._id,
-          };
-          setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Keep most recent 50
-          setNotificationCount(prev => prev + 1);
-          playNotificationSound();
+        // Check if current user was mentioned or replied to
+        if (message.username !== username) {
+          // Check for @mentions in the message
+          if (message.content.includes(`@${username}`)) {
+            const newNotification = {
+              id: Date.now(),
+              type: 'mention',
+              message: `${message.username} mentioned you`,
+              content: message.content,
+              timestamp: new Date(),
+              messageId: message._id,
+            };
+            setNotifications(prev => [newNotification, ...prev].slice(0, 50));
+            setNotificationCount(prev => prev + 1);
+            playNotificationSound();
+          }
+          
+          // Check if message is a reply to the current user
+          if (message.replyTo && message.replyTo.username === username) {
+            const newNotification = {
+              id: Date.now(),
+              type: 'reply',
+              message: `${message.username} replied to your message`,
+              content: message.content,
+              timestamp: new Date(),
+              messageId: message._id,
+            };
+            setNotifications(prev => [newNotification, ...prev].slice(0, 50));
+            setNotificationCount(prev => prev + 1);
+            playNotificationSound();
+          }
         }
+        
+        setTimeout(scrollToBottom, 200);
       }
-      
-      setTimeout(scrollToBottom, 200);
     });
 
     socket.on('room_data', (roomData) => {
@@ -493,6 +503,43 @@ function ChatRoom() {
       }
     });
 
+    // Handle room deletion
+    socket.on('room_deleted', (data) => {
+      if (data.roomId === roomId) {
+        // Add a system message about the room deletion
+        setMessages(prev => [...prev, {
+          _id: Date.now().toString(),
+          username: 'System',
+          content: `This room has been deleted by ${data.deletedBy}. You will be redirected to the home page.`,
+          createdAt: new Date().toISOString(),
+          isSystemMessage: true
+        }]);
+        
+        // Redirect to home page after a short delay
+        setTimeout(() => {
+          navigate('/');
+        }, 3000);
+      }
+    });
+
+    socket.on('delete_room_response', (data) => {
+      if (data.success) {
+        // Add a system message about the room deletion
+        setMessages(prev => [...prev, {
+          _id: Date.now().toString(),
+          username: 'System',
+          content: `This room has been deleted by ${data.isAdmin ? 'an admin' : 'the room owner'}. You will be redirected to the home page.`,
+          createdAt: new Date().toISOString(),
+          isSystemMessage: true
+        }]);
+        
+        // Redirect to home page after a short delay
+        setTimeout(() => {
+          navigate('/');
+        }, 3000);
+      }
+    });
+
     socket.emit('join_room', roomId);
     socket.emit('get_room_data', roomId);
     socket.emit('get_rooms');
@@ -516,6 +563,8 @@ function ChatRoom() {
       socket.off('delete_message_response');
       socket.off('room_members');
       socket.off('rooms_list');
+      socket.off('room_deleted');
+      socket.off('delete_room_response');
       document.head.removeChild(link);
     };
   }, [roomId, username]);
@@ -594,7 +643,10 @@ function ChatRoom() {
   // Handle @ mentions
   const handleInputChange = (e) => {
     const value = e.target.value;
-    setNewMessage(value);
+    if (value.length <= MAX_MESSAGE_LENGTH) {
+      setNewMessage(value);
+      setCharacterCount(value.length);
+    }
 
     // Handle mention search
     if (mentionStartIndex.current !== -1) {
@@ -956,16 +1008,16 @@ function ChatRoom() {
     handleMentionSearch(newMessage);
   }, [newMessage, roomUsers]);
   
-  if (loading) {
+  if (loading || switchingRoom) {
     return (
       <Box
         sx={{
-          width: '100vw',
-          height: '100vh',
+          minHeight: '100vh',
           display: 'flex',
-          justifyContent: 'center',
           alignItems: 'center',
+          justifyContent: 'center',
           background: '#000',
+          position: 'relative',
           backgroundImage: 'url(/bg.jpg)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
@@ -973,99 +1025,323 @@ function ChatRoom() {
           fontFamily: '"Tahoma", sans-serif',
         }}
       >
+        {/* Main chat container with sidebars */}
         <Box
           sx={{
-            width: 300,
-            borderRadius: 0,
+            display: 'flex',
+            width: '1300px',
+            height: '700px',
+            borderRadius: '0',
             overflow: 'hidden',
-            border: '1px solid #999',
-            boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.15)',
-            backgroundColor: 'white',
+            boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #770094',
           }}
         >
-          {/* Title bar */}
+          {/* Left Sidebar - Rooms List */}
           <Box
             sx={{
-              height: 22,
-              bgcolor: '#a828c5',
+              width: '200px',
+              height: '100%',
               display: 'flex',
-              alignItems: 'center',
-              px: 1,
-              backgroundImage: 'linear-gradient(to right, #9911ba, #7322ab)',
-              color: 'white',
+              flexDirection: 'column',
+              borderRight: '1px solid #770094',
+              zIndex: 2,
+              backgroundColor: '#f7eefb',
             }}
           >
-            <Typography 
-              variant="caption" 
+            <Box 
               sx={{ 
-                flexGrow: 1,
-                fontSize: '11px',
-                fontWeight: 'bold',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                color: '#fff',
+                height: '24px',
+                px: 1,
+                userSelect: 'none',
               }}
             >
-              <Box
-                component="img"
-                src="https://i.ibb.co/hxwVLpW9/meetme.png"
-                alt="Buzzed Icon"
+              <Typography 
                 sx={{ 
-                  width: 15, 
-                  height: 15,
-                  mr: 0.5,
-                  mt: '-2px',
-                  objectFit: 'contain'
+                  fontSize: '12px', 
+                  fontWeight: 'bold',
+                  fontFamily: '"Tahoma", sans-serif',
                 }}
-              />
-              BUZZED! MESSENGER - LOADING
-            </Typography>
+              >
+                Chat Rooms
+              </Typography>
+            </Box>
+            
+            <Box sx={{ 
+              flex: 1, 
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                background: '#f0e5f5',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                background: 'linear-gradient(to right, #b57ad9 0%, #9e56b6 100%)',
+                borderRadius: '4px',
+              },
+            }}>
+              <List dense disablePadding>
+                {availableRooms.map((chatRoom) => (
+                  <ListItem 
+                    key={chatRoom._id}
+                    button 
+                    selected={chatRoom._id === roomId}
+                    onClick={() => navigate(`/room/${chatRoom._id}`)}
+                    sx={{ 
+                      borderBottom: '1px solid #e0e0e0',
+                      bgcolor: chatRoom._id === roomId ? '#edd6f8' : 'transparent',
+                      '&:hover': {
+                        bgcolor: '#f2e3fa',
+                      },
+                      '&.Mui-selected': {
+                        bgcolor: '#e5c7f5',
+                        '&:hover': {
+                          bgcolor: '#e5c7f5',
+                        },
+                      },
+                    }}
+                  >
+                    <ListItemAvatar sx={{ minWidth: '36px' }}>
+                      <Avatar 
+                        sx={{ 
+                          width: 28, 
+                          height: 28, 
+                          bgcolor: '#770094',
+                          fontSize: '12px',
+                        }}
+                      >
+                        {chatRoom.name.charAt(0).toUpperCase()}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText 
+                      primary={chatRoom.name} 
+                      primaryTypographyProps={{ 
+                        fontSize: '13px',
+                        fontFamily: 'Tahoma',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      secondary={chatRoom.owner === username ? "You own this room" : null}
+                      secondaryTypographyProps={{
+                        fontSize: '10px',
+                        color: '#006600',
+                        fontFamily: 'Tahoma',
+                      }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           </Box>
 
-          {/* Loading content */}
-          <Box sx={{ p: 3, textAlign: 'center' }}>
+          {/* Main Chat Window with Loading State */}
+          <Box
+            sx={{
+              width: 'calc(100% - 400px)',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              zIndex: 1,
+              backgroundColor: '#f7eefb',
+            }}
+          >
+            {/* Title bar */}
             <Box 
-              component="img"
-              src="/welcome/sleep.png"
-              alt="Loading Character"
               sx={{ 
-                width: 80, 
-                height: 80,
-                mb: 2,
-                objectFit: 'contain',
-              }}
-            />
-            
-            <Typography 
-              sx={{ 
-                color: '#770094', 
-                fontSize: '16px', 
-                fontWeight: 'bold',
-                mb: 2,
-                fontFamily: '"Tahoma", sans-serif'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                color: '#fff',
+                height: '24px',
+                px: 0.5,
+                userSelect: 'none',
               }}
             >
-              Connecting to Room...
-            </Typography>
-            
-            <CircularProgress 
-              size={24} 
-              thickness={5}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Box 
+                  component="img" 
+                  src="https://i.ibb.co/hxwVLpW9/meetme.png" 
+                  alt="Buzzed! Messenger" 
+                  sx={{ 
+                    height: '16px',
+                    width: 'auto',
+                    mr: 0.5,
+                  }}
+                />
+                <Typography 
+                  sx={{
+                    fontSize: '12px', 
+                    fontWeight: 'bold',
+                    fontFamily: '"Tahoma", sans-serif',
+                  }}
+                >
+                  {switchingRoom ? 'Switching Rooms...' : 'Connecting to Room...'}
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Loading content */}
+            <Box 
               sx={{ 
-                color: '#770094',
-                mb: 2,
-              }} 
-            />
-            
-            <Typography 
-              sx={{ 
-                fontSize: '11px', 
-                color: '#666',
-                fontFamily: '"Tahoma", sans-serif',
-                fontStyle: 'italic'
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#ffffff',
+                p: 3,
               }}
             >
-              Please wait while we connect you to the chat room
-            </Typography>
+              <Box 
+                component="img"
+                src="/welcome/sleep.png"
+                alt="Loading Character"
+                sx={{ 
+                  width: 80, 
+                  height: 80,
+                  mb: 2,
+                  objectFit: 'contain',
+                }}
+              />
+              
+              <CircularProgress 
+                size={24} 
+                thickness={5}
+                sx={{ 
+                  color: '#770094',
+                  mb: 2,
+                }} 
+              />
+              
+              <Typography 
+                sx={{ 
+                  fontSize: '11px', 
+                  color: '#666',
+                  fontFamily: '"Tahoma", sans-serif',
+                  fontStyle: 'italic'
+                }}
+              >
+                Please wait while we {switchingRoom ? 'switch' : 'connect'} you to the chat room
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Right Sidebar - Room Members */}
+          <Box
+            sx={{
+              width: '200px',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              borderLeft: '1px solid #770094',
+              zIndex: 2,
+              backgroundColor: '#f7eefb',
+            }}
+          >
+            <Box 
+              sx={{ 
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                color: '#fff',
+                height: '24px',
+                px: 1,
+                userSelect: 'none',
+              }}
+            >
+              <Typography 
+                sx={{ 
+                  fontSize: '12px', 
+                  fontWeight: 'bold',
+                  fontFamily: '"Tahoma", sans-serif',
+                }}
+              >
+                Room Members
+              </Typography>
+            </Box>
+            
+            <Box sx={{ 
+              flex: 1, 
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                background: '#f0e5f5',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                background: 'linear-gradient(to right, #b57ad9 0%, #9e56b6 100%)',
+                borderRadius: '4px',
+              },
+            }}>
+              <List dense disablePadding>
+                {roomUsers.map((user) => (
+                  <ListItem 
+                    key={user.id || user.username}
+                    sx={{ 
+                      borderBottom: '1px solid #e0e0e0',
+                      py: 0.75,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        width: '100%',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: user.isActive ? '#4caf50' : '#f44336',
+                          mr: 1.5,
+                          ml: 1,
+                          border: '1px solid',
+                          borderColor: user.isActive ? '#006600' : '#aa0000',
+                        }}
+                      />
+                      <Typography
+                        sx={{
+                          fontSize: '13px',
+                          fontFamily: 'Tahoma',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          color: '#000000',
+                        }}
+                      >
+                        {user.username}
+                        {user.username === username && (
+                          <Typography
+                            component="span"
+                            sx={{
+                              fontSize: '10px',
+                              color: '#006600',
+                              fontFamily: 'Tahoma',
+                              ml: 0.5,
+                            }}
+                          >
+                            (You)
+                          </Typography>
+                        )}
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
           </Box>
         </Box>
       </Box>
@@ -2373,7 +2649,7 @@ function ChatRoom() {
                 </IconButton>
               </Box>
             )}
-            <Box sx={{ display: 'flex' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <TextField
                 inputRef={inputRef}
                 fullWidth
@@ -2382,7 +2658,7 @@ function ChatRoom() {
                 size="small"
                 onKeyDown={handleKeyDown}
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={handleInputChange}
                 sx={{
                   flexGrow: 1,
                   '& .MuiOutlinedInput-root': {
@@ -2397,6 +2673,17 @@ function ChatRoom() {
                   }
                 }}
               />
+              <Typography 
+                sx={{ 
+                  fontSize: '11px', 
+                  color: characterCount === MAX_MESSAGE_LENGTH ? '#ff0000' : '#666666',
+                  fontFamily: 'Tahoma',
+                  minWidth: '50px',
+                  textAlign: 'right'
+                }}
+              >
+                {characterCount}/{MAX_MESSAGE_LENGTH}
+              </Typography>
               <MentionsPopup
                 users={mentionsSearchResult.map(user => user.username)}
                 searchText={mentionSearch ? mentionSearch.query : ''}

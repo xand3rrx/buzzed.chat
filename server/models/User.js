@@ -5,8 +5,12 @@ const userSchema = new mongoose.Schema({
   username: {
     type: String,
     required: true,
-    unique: true,
     trim: true
+  },
+  usernameLower: {
+    type: String,
+    unique: true,
+    index: true
   },
   passwordHash: {
     type: String,
@@ -20,6 +24,14 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
+});
+
+// Pre-save middleware to set usernameLower
+userSchema.pre('save', function(next) {
+  if (this.username) {
+    this.usernameLower = this.username.toLowerCase();
+  }
+  next();
 });
 
 // Method to set password (hash it with random salt)
