@@ -179,7 +179,11 @@ function YahooLogin({ socket }) {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        background: '#f0f0f0',
+        background: '#000',
+        backgroundImage: 'url(/bg.jpg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         fontFamily: '"Tahoma", sans-serif',
       }}
     >
@@ -190,6 +194,8 @@ function YahooLogin({ socket }) {
           borderRadius: 0,
           overflow: 'hidden',
           border: '1px solid #999',
+          boxShadow: '5px 5px 15px rgba(0, 0, 0, 0.15)',
+          backgroundColor: 'white',
         }}
       >
         {/* Title bar */}
@@ -326,7 +332,7 @@ function YahooLogin({ socket }) {
             <Box
               component="img"
               src="https://i.ibb.co/hxwVLpW9/meetme.png" // Our new logo
-              alt="MeetMe Logo"
+              alt="Buzzed! Messenger Logo"
               sx={{ 
                 width: 120, 
                 height: 'auto',

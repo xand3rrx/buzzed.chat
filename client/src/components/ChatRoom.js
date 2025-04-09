@@ -31,6 +31,7 @@ import MinimizeIcon from '@mui/icons-material/Minimize';
 import PersonIcon from '@mui/icons-material/Person';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import FormatItalicIcon from '@mui/icons-material/FormatItalic';
+import FormatUnderlinedIcon from '@mui/icons-material/FormatUnderlined';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ColorLensIcon from '@mui/icons-material/ColorLens';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
@@ -238,6 +239,7 @@ function ChatRoom() {
   const [textFormat, setTextFormat] = useState({
     bold: false,
     italic: false,
+    underline: false,
   });
   const [textColor, setTextColor] = useState(TEXT_COLORS[0].value); // Default black
   const [showEmojis, setShowEmojis] = useState(false);
@@ -721,7 +723,8 @@ function ChatRoom() {
     // First check if there are any formatting characters
     const hasFormatting = content && (
       content.includes('**') || 
-      content.includes('*')
+      content.includes('*') ||
+      content.includes('__')
     );
     
     // Check for emoticons in this part
@@ -776,77 +779,82 @@ function ChatRoom() {
       
       // Process formatting in non-mention parts
       if (hasFormatting) {
-        // Regular expression that handles bold and italic nested properly
-        // Process the more specific bold format first
-        let formattedText = part;
-        let boldElements = [];
-        let lastIndex = 0;
+        // Prepare result array
+        let result = [];
         
-        // Find all bold text sections
-        const boldRegex = /\*\*(.*?)\*\*/g;
-        let boldMatch;
+        // Use a regex pattern that will match all markdown formatting patterns
+        // Order matters here - need to process patterns with higher precedence first
+        const patterns = [
+          { regex: /\*\*(.*?)\*\*/g, style: (content) => <strong style={{ color: messageColor }}>{content}</strong> },
+          { regex: /\*(.*?)\*/g, style: (content) => <em style={{ color: messageColor }}>{content}</em> },
+          { regex: /__(.*?)__/g, style: (content) => <span style={{ textDecoration: 'underline', color: messageColor }}>{content}</span> },
+        ];
         
-        while ((boldMatch = boldRegex.exec(part)) !== null) {
-          // Add text before the bold section
-          if (boldMatch.index > lastIndex) {
-            const beforeText = part.substring(lastIndex, boldMatch.index);
-            boldElements.push(<span style={{ color: messageColor }}>{beforeText}</span>);
+        // Start with the original text
+        let remaining = part;
+        let lastEndIndex = 0;
+        
+        // For each pattern, find all matches and replace them
+        patterns.forEach(({ regex, style }) => {
+          // Reset regex state
+          regex.lastIndex = 0;
+          
+          // Create new text by replacing the pattern matches
+          let processedText = '';
+          let lastIndex = 0;
+          let match;
+          let allMatches = [];
+          
+          // Find all matches
+          while ((match = regex.exec(remaining)) !== null) {
+            allMatches.push({
+              startIndex: match.index,
+              endIndex: match.index + match[0].length,
+              fullMatch: match[0],
+              content: match[1]
+            });
           }
           
-          // Add the bold text
-          boldElements.push(
-            <strong key={`bold-${boldMatch.index}`} style={{ color: messageColor }}>
-              {boldMatch[1]}
-            </strong>
-          );
-          
-          lastIndex = boldMatch.index + boldMatch[0].length;
-        }
-        
-        // Add any remaining text after the last bold section
-        if (lastIndex < part.length) {
-          boldElements.push(<span style={{ color: messageColor }}>{part.substring(lastIndex)}</span>);
-        }
-        
-        // Now process italic formatting on the non-bold text portions
-        const processedElements = boldElements.map((el, i) => {
-          if (typeof el === 'string') {
-            // Process italic formatting in text portions
-            const italicFragments = [];
-            let italicLastIndex = 0;
-            const italicRegex = /\*(.*?)\*/g;
-            let italicMatch;
-            
-            while ((italicMatch = italicRegex.exec(el)) !== null) {
-              // Add text before the italic section
-              if (italicMatch.index > italicLastIndex) {
-                italicFragments.push(<span style={{ color: messageColor }}>{el.substring(italicLastIndex, italicMatch.index)}</span>);
-              }
+          // Process the text with these matches
+          if (allMatches.length > 0) {
+            allMatches.forEach(match => {
+              // Add text before this match
+              processedText += remaining.substring(lastIndex, match.startIndex);
               
-              // Add the italic text
-              italicFragments.push(
-                <em key={`italic-${italicMatch.index}`} style={{ color: messageColor }}>
-                  {italicMatch[1]}
-                </em>
-              );
+              // Add styled match content
+              processedText += `###FORMATTED_${result.length}###`;
+              result.push(style(match.content));
               
-              italicLastIndex = italicMatch.index + italicMatch[0].length;
-            }
+              // Update last index
+              lastIndex = match.endIndex;
+            });
             
             // Add any remaining text
-            if (italicLastIndex < el.length) {
-              italicFragments.push(<span style={{ color: messageColor }}>{el.substring(italicLastIndex)}</span>);
-            }
-            
-            return italicFragments;
+            processedText += remaining.substring(lastIndex);
+            remaining = processedText;
           }
-          
-          // Return the bold element as is
-          return el;
         });
         
-        // Flatten the array
-        return <React.Fragment key={index}>{processedElements.flat()}</React.Fragment>;
+        // If there were no matches, just use the original text
+        if (result.length === 0) {
+          return <span key={index} style={{ color: messageColor }}>{part}</span>;
+        }
+        
+        // Split the remaining text by the placeholder markers
+        const segments = remaining.split(/(###FORMATTED_\d+###)/g);
+        
+        // Convert segments to React elements, replacing placeholders with formatted content
+        return (
+          <React.Fragment key={index}>
+            {segments.map((segment, segmentIndex) => {
+              if (segment.startsWith('###FORMATTED_')) {
+                const placeholderIndex = parseInt(segment.match(/\d+/)[0], 10);
+                return <React.Fragment key={segmentIndex}>{result[placeholderIndex]}</React.Fragment>;
+              }
+              return segment ? <span key={segmentIndex} style={{ color: messageColor }}>{segment}</span> : null;
+            })}
+          </React.Fragment>
+        );
       }
       
       // Return plain text if no formatting
@@ -1359,16 +1367,16 @@ function ChatRoom() {
   return (
     <Box
       sx={{
-        height: '100vh',
+        minHeight: '100vh',
         display: 'flex',
-        justifyContent: 'center',
         alignItems: 'center',
-        background: '#ebeef4',
-        backgroundImage: 'url(https://wallpapercave.com/wp/wp2754141.jpg)',
+        justifyContent: 'center',
+        background: '#000',
+        position: 'relative',
+        backgroundImage: 'url(/bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        position: 'relative',
-        overflow: 'hidden',
+        backgroundRepeat: 'no-repeat',
         fontFamily: '"Tahoma", sans-serif',
         ...cursorStyle,
       }}
@@ -1569,7 +1577,7 @@ function ChatRoom() {
               <Box 
                 component="img" 
                 src="https://i.ibb.co/hxwVLpW9/meetme.png" 
-                alt="MeetMe" 
+                alt="Buzzed! Messenger" 
                 sx={{ 
                   height: '16px',
                   width: 'auto',
@@ -1583,7 +1591,7 @@ function ChatRoom() {
                   fontFamily: '"Tahoma", sans-serif',
                 }}
               >
-                {room.name} - MeetMe
+                {room.name} - Buzzed! Messenger
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1621,7 +1629,7 @@ function ChatRoom() {
             </Box>
           </Box>
 
-          {/* MeetMe toolbar */}
+          {/* Buzzed! Messenger toolbar */}
           <Box 
             sx={{ 
               py: 0.5, 
@@ -1721,7 +1729,7 @@ function ChatRoom() {
             <UserMenu username={username} socket={socket} />
           </Box>
 
-          {/* Messages container with MeetMe style */}
+          {/* Messages container with Buzzed! Messenger style */}
           <Box 
             ref={messagesContainerRef}
             sx={{ 
@@ -1839,7 +1847,7 @@ function ChatRoom() {
                     </Box>
                   )}
 
-                  {/* Message with MeetMe style */}
+                  {/* Message with Buzzed! Messenger style */}
                   {!message.isSystemMessage ? (
                     <Box sx={{ 
                       display: 'flex',
@@ -2050,6 +2058,39 @@ function ChatRoom() {
                 <FormatItalicIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            <Tooltip title="Underline">
+              <IconButton 
+                size="small" 
+                onClick={() => {
+                  const input = inputRef.current;
+                  if (input) {
+                    const start = input.selectionStart;
+                    const end = input.selectionEnd;
+                    if (start !== end) {
+                      const selectedText = newMessage.substring(start, end);
+                      const newText = newMessage.substring(0, start) + 
+                                     `__${selectedText}__` + 
+                                     newMessage.substring(end);
+                      setNewMessage(newText);
+                      // Set cursor position after formatting
+                      setTimeout(() => {
+                        input.focus();
+                        input.setSelectionRange(start + 2, end + 2);
+                      }, 0);
+                    } else {
+                      // Toggle underline for future typing
+                      setTextFormat(prev => ({ ...prev, underline: !prev.underline }));
+                    }
+                  }
+                }}
+                sx={{ 
+                  color: textFormat.underline ? '#0E53A7' : '#666',
+                  '&:hover': { bgcolor: '#D9E1F2' }
+                }}
+              >
+                <FormatUnderlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Emojis">
               <IconButton 
                 size="small" 
@@ -2162,7 +2203,7 @@ function ChatRoom() {
                   borderBottom: '1px solid #d0c0dd',
                 }}
               >
-                MeetMe Emoticons
+                Buzzed! Messenger Emoticons
               </Typography>
               
               {(() => {
@@ -2510,7 +2551,7 @@ function ChatRoom() {
         )}
       </Box>
 
-      {/* Notification Menu with MeetMe Style */}
+      {/* Notification Menu with Buzzed! Messenger Style */}
       <Menu
         anchorEl={anchorEl}
         open={openNotificationsMenu}

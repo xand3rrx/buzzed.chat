@@ -363,7 +363,7 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
               <Box 
                 component="img"
                 src="/logo.png"
-                alt="MeetMe Logo"
+                alt="Buzzed! Messenger Logo"
                 sx={{ 
                   height: '24px',
                   opacity: 0.7,
@@ -380,7 +380,7 @@ function RoomCustomizationPanel({ roomId, socket, isRoomOwner, dialogOpen, setDi
                   mt: 0.5
                 }}
               >
-                MeetMe Room Customization v1.0
+                Buzzed! Messenger Room Customization v1.0
               </Typography>
             </Box>
           </Box>

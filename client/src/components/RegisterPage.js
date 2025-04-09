@@ -322,7 +322,7 @@ function RegisterPage({ socket }) {
             <Box
               component="img"
               src="https://i.ibb.co/hxwVLpW9/meetme.png"
-              alt="MeetMe Logo"
+              alt="Buzzed! Messenger Logo"
               sx={{ width: 120, height: 'auto' }}
             />
             

@@ -152,14 +152,15 @@ function LandingPage() {
   return (
     <Box
       sx={{
-        height: '100vh',
+        minHeight: '100vh',
         display: 'flex',
-        justifyContent: 'center',
+        flexDirection: 'column',
         alignItems: 'center',
-        background: '#ebeef4',
-        backgroundImage: 'url(https://wallpapercave.com/wp/wp2754141.jpg)',
+        justifyContent: 'center',
+        backgroundImage: 'url(/bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         position: 'relative',
         overflow: 'hidden',
         fontFamily: '"Tahoma", sans-serif',
@@ -195,7 +196,7 @@ function LandingPage() {
             <Box 
               component="img" 
               src="https://i.ibb.co/hxwVLpW9/meetme.png" 
-              alt="MeetMe" 
+              alt="Buzzed! Messenger" 
               sx={{ 
                 width: 'auto',
                 height: '18px',
