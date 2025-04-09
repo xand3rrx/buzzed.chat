@@ -437,7 +437,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete message (only for room owner or admin user 'xand3rr')
+  // Delete message (only for room owner, admin user 'xand3rr', or global moderators)
   socket.on('delete_message', async (data) => {
     try {
       const { messageId, roomId } = data;
@@ -451,11 +451,14 @@ io.on('connection', (socket) => {
         });
       }
       
-      // Check if the user is the room owner or the admin user 'xand3rr'
+      // Check if the user is the room owner, admin user 'xand3rr', or a global moderator
       const isAdmin = socketUsername === 'xand3rr';
-      if (room.owner !== socketUsername && !isAdmin) {
+      const user = await User.findOne({ username: socketUsername });
+      const isGlobalModerator = user && user.role === 'globalModerator';
+      
+      if (room.owner !== socketUsername && !isAdmin && !isGlobalModerator) {
         return socket.emit('command_error', { 
-          message: 'Only the room owner can delete messages' 
+          message: 'Only the room owner, admin, or global moderators can delete messages' 
         });
       }
       
@@ -465,18 +468,21 @@ io.on('connection', (socket) => {
       // Notify all users in the room about the deleted message
       io.to(roomId).emit('message_deleted', { 
         messageId,
-        deletedBy: socketUsername
+        deletedBy: socketUsername,
+        isAdmin,
+        isGlobalModerator
       });
       
       // Send success response specifically to the user who deleted the message
       socket.emit('delete_message_response', { 
         success: true, 
         messageId,
-        isAdmin
+        isAdmin,
+        isGlobalModerator
       });
       
-      // Log the deletion with admin flag if applicable
-      console.log(`Message ${messageId} deleted by ${isAdmin ? 'admin' : 'room owner'} ${socketUsername}`);
+      // Log the deletion with appropriate flag
+      console.log(`Message ${messageId} deleted by ${isAdmin ? 'admin' : isGlobalModerator ? 'global moderator' : 'room owner'} ${socketUsername}`);
     } catch (error) {
       console.error('Error deleting message:', error);
       socket.emit('command_error', { 

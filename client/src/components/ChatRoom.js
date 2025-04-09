@@ -2231,8 +2231,8 @@ function ChatRoom() {
                               </IconButton>
                             </Tooltip>
                           )}
-                          {(isRoomOwner || username === 'xand3rr') && !message.isDeleted && message.username !== 'System' && (
-                            <Tooltip title={username === 'xand3rr' ? "Admin Delete" : "Delete Message"}>
+                          {(isRoomOwner || username === 'xand3rr' || userRole === 'globalModerator') && !message.isDeleted && message.username !== 'System' && (
+                            <Tooltip title={username === 'xand3rr' ? "Admin Delete" : userRole === 'globalModerator' ? "Moderator Delete" : "Delete Message"}>
                               <IconButton
                                 onClick={() => {
                                   socket.emit('delete_message', { roomId, messageId: message._id });
@@ -2240,7 +2240,7 @@ function ChatRoom() {
                                 size="small"
                                 sx={{
                                   padding: '2px',
-                                  color: username === 'xand3rr' ? '#0000CC' : '#800000',
+                                  color: username === 'xand3rr' ? '#0000CC' : userRole === 'globalModerator' ? '#006400' : '#800000',
                                   bgcolor: '#f0f0f0',
                                   border: '1px solid #d0d0d0',
                                   '&:hover': {
