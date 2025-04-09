@@ -382,7 +382,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete message (only for room owner)
+  // Delete message (only for room owner or admin user 'xand3rr')
   socket.on('delete_message', async (data) => {
     try {
       const { messageId, roomId } = data;
@@ -396,8 +396,9 @@ io.on('connection', (socket) => {
         });
       }
       
-      // Check if the user is the room owner
-      if (room.owner !== socketUsername) {
+      // Check if the user is the room owner or the admin user 'xand3rr'
+      const isAdmin = socketUsername === 'xand3rr';
+      if (room.owner !== socketUsername && !isAdmin) {
         return socket.emit('command_error', { 
           message: 'Only the room owner can delete messages' 
         });
@@ -407,9 +408,20 @@ io.on('connection', (socket) => {
       await Message.findByIdAndDelete(messageId);
       
       // Notify all users in the room about the deleted message
-      io.to(roomId).emit('message_deleted', { messageId });
+      io.to(roomId).emit('message_deleted', { 
+        messageId,
+        deletedBy: socketUsername
+      });
       
-      console.log(`Message ${messageId} deleted by room owner ${socketUsername}`);
+      // Send success response specifically to the user who deleted the message
+      socket.emit('delete_message_response', { 
+        success: true, 
+        messageId,
+        isAdmin
+      });
+      
+      // Log the deletion with admin flag if applicable
+      console.log(`Message ${messageId} deleted by ${isAdmin ? 'admin' : 'room owner'} ${socketUsername}`);
     } catch (error) {
       console.error('Error deleting message:', error);
       socket.emit('command_error', { 

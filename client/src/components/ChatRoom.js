@@ -449,7 +449,10 @@ function ChatRoom() {
           message._id === data.messageId 
             ? { 
                 ...message, 
-                content: 'This message was deleted by the room owner.',
+                content: data.deletedBy === 'xand3rr' 
+                  ? 'This message was deleted by an admin.' 
+                  : 'This message was deleted by the room owner.',
+                deletedBy: data.deletedBy,
                 deletedAt: new Date().toISOString(),
                 isDeleted: true 
               }
@@ -1952,8 +1955,8 @@ function ChatRoom() {
                               </IconButton>
                             </Tooltip>
                           )}
-                          {isRoomOwner && !message.isDeleted && message.username !== 'System' && (
-                            <Tooltip title="Delete Message">
+                          {(isRoomOwner || username === 'xand3rr') && !message.isDeleted && message.username !== 'System' && (
+                            <Tooltip title={username === 'xand3rr' ? "Admin Delete" : "Delete Message"}>
                               <IconButton
                                 onClick={() => {
                                   socket.emit('delete_message', { roomId, messageId: message._id });
@@ -1961,7 +1964,7 @@ function ChatRoom() {
                                 size="small"
                                 sx={{
                                   padding: '2px',
-                                  color: '#800000',
+                                  color: username === 'xand3rr' ? '#0000CC' : '#800000',
                                   bgcolor: '#f0f0f0',
                                   border: '1px solid #d0d0d0',
                                   '&:hover': {
