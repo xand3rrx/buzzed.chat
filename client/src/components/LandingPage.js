@@ -36,8 +36,6 @@ function LandingPage() {
   const [username, setUsername] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [recentRooms, setRecentRooms] = useState([]);
-  const [roomCreationPending, setRoomCreationPending] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     // Add Atkinson Hyperlegible font
@@ -83,18 +81,19 @@ function LandingPage() {
     });
     
     socket.on('rooms_list', (roomsList) => {
+      console.log('Received rooms list:', roomsList);
       setRooms(roomsList);
     });
 
     socket.on('room_created', (newRoom) => {
-      setRooms(prev => [...prev, newRoom]);
-      setNewRoomName('');
-      setRoomCreationPending(false);
+      console.log('Room created:', newRoom);
+      setRooms(prevRooms => [...prevRooms, newRoom]);
+      // Add to recent rooms
+      addToRecentRooms(newRoom);
     });
 
-    // Handle errors
     socket.on('error', (error) => {
-      setError('Connection error. Please try again.');
+      console.error('Socket error:', error);
     });
 
     socket.emit('get_rooms');
@@ -122,8 +121,10 @@ function LandingPage() {
 
   const handleCreateRoom = () => {
     if (newRoomName.trim()) {
-      setRoomCreationPending(true);
+      console.log('Creating room:', newRoomName.trim());
       socket.emit('create_room', newRoomName.trim());
+      setNewRoomName('');
+      setShowCreateForm(false);
     }
   };
 

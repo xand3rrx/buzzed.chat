@@ -76,50 +76,62 @@ const theme = createTheme({
 });
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('loggedIn'));
-  const [username, setUsername] = useState(localStorage.getItem('username') || '');
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [showDebugger, setShowDebugger] = useState(false); // State to toggle debugger
 
   useEffect(() => {
+    // Socket connection event handlers
+    const onConnect = () => {
+      console.log('Socket connected!');
+      setSocketConnected(true);
+    };
+
+    const onDisconnect = () => {
+      console.log('Socket disconnected!');
+      setSocketConnected(false);
+    };
+
+    // Debug all socket events
+    const debugAllEvents = (event, ...args) => {
+      console.log(`[DEBUG] Socket event "${event}":`, args);
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.onAny(debugAllEvents);
+
+    // Specific login event handlers
+    socket.on('login_success', (data) => {
+      console.log('Received login_success event:', data);
+    });
+    
+    socket.on('login_successful', (data) => {
+      console.log('Received login_successful event:', data);
+    });
+
+    // Handle logout success event
+    socket.on('logout_success', () => {
+      console.log('Received logout_success event');
+      localStorage.removeItem('isRegisteredUser');
+      localStorage.removeItem('chatUsername');
+    });
+
+    // Make sure socket is connected
     if (!socket.connected) {
+      console.log('Attempting to connect socket...');
       socket.connect();
     }
 
-    socket.on('connect', () => {
-      if (username) {
-        socket.emit('use_existing_username', username);
-      }
-    });
-
-    socket.on('login_success', (data) => {
-      setIsAuthenticated(true);
-      setUsername(data.username);
-      localStorage.setItem('loggedIn', 'true');
-      localStorage.setItem('username', data.username);
-    });
-
-    socket.on('login_successful', (data) => {
-      setIsAuthenticated(true);
-      setUsername(data.username);
-      localStorage.setItem('loggedIn', 'true');
-      localStorage.setItem('username', data.username);
-    });
-
-    socket.on('logout_success', () => {
-      setIsAuthenticated(false);
-      setUsername('');
-      localStorage.removeItem('loggedIn');
-      localStorage.removeItem('username');
-    });
-
+    // Cleanup event listeners on component unmount
     return () => {
-      socket.off('connect');
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.off('login_success');
       socket.off('login_successful');
       socket.off('logout_success');
+      socket.offAny(debugAllEvents);
     };
-  }, [username]);
+  }, []);
 
   // Toggle debugger visibility
   const toggleDebugger = () => {

@@ -18,51 +18,149 @@ function RegisterPage({ socket }) {
   const [registerSuccess, setRegisterSuccess] = useState(false);
   const navigate = useNavigate();
   const faceRef = useRef(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    // Socket connection check
-    if (!socket.connected) {
-      socket.connect();
+    console.log("Socket object in RegisterPage:", socket);
+    
+    // Check if socket is connected
+    if (socket) {
+      console.log("Socket connection status:", socket.connected);
+      console.log("Socket ID:", socket.id);
+      
+      if (!socket.connected) {
+        console.log("Socket not connected. Attempting to connect...");
+        socket.connect();
+      }
+    } else {
+      console.error("Socket object is not available!");
     }
-
-    // Event listeners setup
-    socket.on('username_registered', (data) => {
-      setRegisterSuccess(true);
-      localStorage.setItem('loggedIn', 'true');
-      localStorage.setItem('username', data.username);
+    
+    // Check if user is already logged in
+    const storedLoginStatus = localStorage.getItem('isRegisteredUser');
+    const storedUsername = localStorage.getItem('chatUsername');
+    
+    if (storedLoginStatus === 'true' && storedUsername) {
+      // If already logged in, go to landing page
       navigate('/');
-    });
-
-    socket.on('command_error', ({ message }) => {
-      setError(message);
-    });
-
-    return () => {
+    }
+    
+    // Function to handle successful registration
+    const handleRegisterSuccess = (data) => {
+      console.log("Registration successful:", data);
+      // Save user data in localStorage
+      localStorage.setItem('isRegisteredUser', 'true');
+      localStorage.setItem('chatUsername', data?.username || 'defaultUser');
+      
+      // Update UI state
+      setRegisterSuccess(true);
+      
+      // Wait for animation to complete before redirecting
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
+    };
+    
+    // Function to handle registration errors
+    const handleRegisterError = (error) => {
+      console.error("Registration error:", error);
+      setError(error?.message || "Registration failed. Please try again.");
+    };
+    
+    // Setup socket event listeners
+    const setupSocketListeners = () => {
+      // Clean up any existing listeners first
+      socket.off('register_success');
       socket.off('username_registered');
       socket.off('command_error');
+      
+      // Add event listeners
+      socket.on('register_success', handleRegisterSuccess);
+      socket.on('username_registered', (data) => {
+        console.log("Username registered event received:", data);
+        // This event is sometimes emitted instead of register_success
+        handleRegisterSuccess(data);
+      });
+      socket.on('command_error', handleRegisterError);
     };
-  }, [navigate]);
+    
+    // Wait for socket to connect before setting up listeners
+    if (socket.connected) {
+      setupSocketListeners();
+    } else {
+      // Setup listeners once connected
+      const onConnect = () => {
+        console.log("Socket connected in RegisterPage component");
+        setupSocketListeners();
+      };
+      socket.once('connect', onConnect);
+    }
+    
+    return () => {
+      // Remove event listeners when component unmounts
+      if (socket) {
+        socket.off('register_success', handleRegisterSuccess);
+        socket.off('username_registered');
+        socket.off('command_error', handleRegisterError);
+        socket.off('connect');
+      }
+    };
+  }, [socket, navigate]);
 
   const handleRegister = () => {
     if (!username.trim() || !password.trim()) {
-      setError('Please enter both username and password.');
+      setError('Please enter a username and password');
       return;
     }
-
-    setError('');
-    setIsSubmitting(true);
-
-    // Handle case where socket might not be connected
-    if (!socket.connected) {
-      socket.connect();
-      // Wait for socket to connect before sending registration
-      setTimeout(() => {
-        socket.emit('register_username', { username, password });
-      }, 1000);
-    } else {
-      socket.emit('register_username', { username, password });
+    
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
     }
+    
+    // Check socket connection
+    if (!socket) {
+      setError('Connection to server not available');
+      return;
+    }
+    
+    if (!socket.connected) {
+      console.log("Socket not connected during registration attempt. Trying to reconnect...");
+      setError('Not connected to server. Attempting to reconnect...');
+      
+      // Try to reconnect and send registration request when connected
+      socket.connect();
+      socket.once('connect', () => {
+        console.log("Socket reconnected, attempting registration now");
+        sendRegisterRequest();
+      });
+      
+      return;
+    }
+    
+    // Send registration request directly if already connected
+    sendRegisterRequest();
+  };
+  
+  const sendRegisterRequest = () => {
+    console.log("Sending registration request for username:", username);
+    setError(''); // Clear any previous errors
+    
+    // Send registration request
+    socket.emit('register_username', {
+      username: username.trim(),
+      password: password.trim()
+    });
+    
+    // Debugging: Log all events for a short period
+    const originalOnAny = socket.onAny;
+    socket.onAny((event, ...args) => {
+      console.log(`[DEBUG] Event after registration attempt: "${event}"`, args);
+    });
+    
+    // Reset onAny after debugging period
+    setTimeout(() => {
+      socket.onAny = originalOnAny;
+    }, 5000);
   };
 
   const handleBackToLogin = () => {

@@ -13,14 +13,12 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 
 function YahooLogin({ socket }) {
-  const [animationState, setAnimationState] = useState('sleep');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [autoSignIn, setAutoSignIn] = useState(false);
   const [signInAsInvisible, setSignInAsInvisible] = useState(true);
   const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
@@ -28,51 +26,145 @@ function YahooLogin({ socket }) {
   const animationRef = useRef(null);
 
   useEffect(() => {
-    // Socket connection check
-    if (!socket.connected) {
-      socket.connect();
+    console.log("Socket object:", socket);
+    
+    // Check if socket is connected
+    if (socket) {
+      console.log("Socket connection status:", socket.connected);
+      console.log("Socket ID:", socket.id);
+      
+      if (!socket.connected) {
+        console.log("Socket not connected. Attempting to connect...");
+        socket.connect();
+      }
+    } else {
+      console.error("Socket object is not available!");
     }
-
-    // Event listeners setup
-    socket.on('login_successful', (data) => {
-      setIsSubmitting(false);
-      localStorage.setItem('loggedIn', 'true');
-      localStorage.setItem('username', data.username);
+    
+    // Check if user is already logged in
+    const storedLoginStatus = localStorage.getItem('isRegisteredUser');
+    const storedUsername = localStorage.getItem('chatUsername');
+    
+    if (storedLoginStatus === 'true' && storedUsername) {
+      // If already logged in, go to landing page
       navigate('/');
-    });
+    }
+    
+    // Function to handle successful login
+    const handleLoginSuccess = (data) => {
+      console.log("Login successful:", data);
+      
+      // Save user data in localStorage
+      localStorage.setItem('isRegisteredUser', 'true');
+      localStorage.setItem('chatUsername', data?.username || 'defaultUser');
+      
+      // Update UI state
+      setLoginSuccess(true);
+      setIsAwake(true);
+      
+      // Wait for animation to complete before redirecting
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
+    };
+    
+    // Function to handle login errors
+    const handleLoginError = (error) => {
+      console.error("Login error:", error);
+      setError(error?.message || "Login failed. Please try again.");
+      setIsAwake(false);
+    };
 
-    socket.on('command_error', ({ message }) => {
-      setIsSubmitting(false);
-      setError(message);
-      setAnimationState('sleep');
-    });
-
-    return () => {
+    // Setup socket event listeners
+    const setupSocketListeners = () => {
+      // Clean up any existing listeners first
+      socket.off('login_success');
       socket.off('login_successful');
       socket.off('command_error');
+      
+      // Add event listeners
+      socket.on('login_success', handleLoginSuccess);
+      socket.on('login_successful', handleLoginSuccess);
+      socket.on('command_error', handleLoginError);
     };
-  }, [navigate]);
+
+    // Wait for socket to connect before setting up listeners
+    if (socket.connected) {
+      setupSocketListeners();
+    } else {
+      // Setup listeners once connected
+      const onConnect = () => {
+        console.log("Socket connected in YahooLogin component");
+        setupSocketListeners();
+      };
+      socket.once('connect', onConnect);
+    }
+    
+    return () => {
+      // Remove event listeners when component unmounts
+      if (socket) {
+        socket.off('login_success', handleLoginSuccess);
+        socket.off('login_successful', handleLoginSuccess);
+        socket.off('command_error', handleLoginError);
+        socket.off('connect');
+      }
+    };
+  }, [socket, navigate]);
 
   const handleLogin = () => {
     if (!username.trim() || !password.trim()) {
-      setError('Please enter both username and password.');
+      setError('Please enter a username and password');
       return;
     }
-
-    setError('');
-    setAnimationState('wake');
-    setIsSubmitting(true);
-
-    // Handle case where socket might not be connected
-    if (!socket.connected) {
-      socket.connect();
-      // Wait for socket to connect before sending login request
-      setTimeout(() => {
-        socket.emit('login_username', { username, password });
-      }, 1000);
-    } else {
-      socket.emit('login_username', { username, password });
+    
+    // Check socket connection
+    if (!socket) {
+      setError('Connection to server not available');
+      return;
     }
+    
+    if (!socket.connected) {
+      console.log("Socket not connected during login attempt. Trying to reconnect...");
+      setError('Not connected to server. Attempting to reconnect...');
+      
+      // Try to reconnect and send login request when connected
+      socket.connect();
+      socket.once('connect', () => {
+        console.log("Socket reconnected, attempting login now");
+        sendLoginRequest();
+      });
+      
+      return;
+    }
+    
+    // Send login request directly if already connected
+    sendLoginRequest();
+  };
+  
+  const sendLoginRequest = () => {
+    console.log("Sending login request for username:", username);
+    
+    // Start animation
+    setIsAwake(true);
+    setIsAnimating(true);
+    setError(''); // Clear any previous errors
+    
+    // Send login request
+    socket.emit('login_username', {
+      username: username.trim(),
+      password: password.trim()
+    });
+    
+    // Debugging: Log all events for a short period
+    const originalOnAny = socket.onAny;
+    socket.onAny((event, ...args) => {
+      console.log(`[DEBUG] Event after login attempt: "${event}"`, args);
+    });
+    
+    // Reset onAny after debugging period
+    setTimeout(() => {
+      socket.onAny = originalOnAny;
+    }, 5000);
   };
 
   const handleRegister = () => {

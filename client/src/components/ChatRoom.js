@@ -264,9 +264,12 @@ function ChatRoom() {
     
     // Handle socket reconnection
     socket.io.on("reconnect", () => {
-      // Rejoin the room after reconnection
-      if (roomId) {
+      console.log("Socket reconnected");
+      if (storedUsername) {
+        // Re-emit the stored username when reconnected
+        socket.emit('use_existing_username', storedUsername);
         socket.emit('join_room', roomId);
+        socket.emit('get_room_data', roomId);
       }
     });
     
@@ -286,15 +289,14 @@ function ChatRoom() {
       socket.emit('use_existing_username', storedUsername);
     }
 
-    // Load previous messages when joining a room
     socket.on('load_messages', (loadedMessages) => {
+      console.log("Loaded messages:", loadedMessages);
       setMessages(loadedMessages);
-      setTimeout(() => {
-        scrollToBottom();
-      }, 100);
+      setTimeout(scrollToBottom, 200);
     });
 
     socket.on('receive_message', (message) => {
+      console.log("Received message with color:", message.textColor);
       setMessages((prevMessages) => [...prevMessages, message]);
       // Add user to active users when they send a message
       if (!message.isSystemMessage) {
@@ -345,6 +347,7 @@ function ChatRoom() {
     });
 
     socket.on('error', (error) => {
+      console.error('Socket error:', error);
       setError(error.message);
       setLoading(false);
     });
@@ -712,6 +715,8 @@ function ChatRoom() {
     const messageColor = (message.textColor && message.textColor !== 'undefined') 
       ? message.textColor 
       : '#000000';
+
+    console.log("Applying formatting to message:", message._id, "with color:", messageColor, "raw textColor:", message.textColor);
     
     // First check if there are any formatting characters
     const hasFormatting = content && (
@@ -856,7 +861,7 @@ function ChatRoom() {
       const audio = new Audio('https://www.myinstants.com/media/sounds/facebook-messenger-tone-2020.mp3');
       audio.play();
     } catch (error) {
-      // Silent error handling
+      console.error('Error playing notification sound:', error);
     }
   };
 
