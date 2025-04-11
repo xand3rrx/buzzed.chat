@@ -33,6 +33,8 @@ mongoose.connect(process.env.MONGODB_URI)
 const Room = require('./models/Room');
 const Message = require('./models/Message');
 const User = require('./models/User');
+const BuddyRelation = require('./models/BuddyRelation');
+const DirectMessage = require('./models/DirectMessage');
 
 const window = new JSDOM('').window;
 const DOMPurify = createDOMPurify(window);
@@ -57,6 +59,12 @@ const generateUsername = () => {
 
 // Store usernames with socket IDs for persistence
 const socketUsers = new Map();
+// Store online users globally
+const onlineUsers = new Set();
+// Store active users per room (for room membership)
+const activeUsersPerRoom = new Map();
+// Store socket IDs for direct messaging
+const userSocketMap = new Map();
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -64,6 +72,7 @@ io.on('connection', (socket) => {
   
   // Create a username variable scoped to this socket
   let socketUsername;
+  let currentRoom = null;
   
   // Check if this socket already had a username assigned (from reconnection)
   if (socketUsers.has(socket.id)) {
@@ -76,11 +85,25 @@ io.on('connection', (socket) => {
     socketUsers.set(socket.id, socketUsername);
     socket.emit('username_assigned', socketUsername);
   }
-  
-  // Use existing username from localStorage
+
+  // Mark user as online when they connect
+  onlineUsers.add(socketUsername);
+  io.emit('user_online', { username: socketUsername });
+
+  // Map username to socket for direct messaging
   socket.on('use_existing_username', (storedUsername) => {
+    // Remove old username mappings
+    onlineUsers.delete(socketUsername);
+    userSocketMap.delete(socketUsername);
+    
     socketUsername = storedUsername;
     socketUsers.set(socket.id, storedUsername);
+    
+    // Add new username mappings
+    onlineUsers.add(storedUsername);
+    userSocketMap.set(storedUsername, socket.id);
+    io.emit('user_online', { username: storedUsername });
+    
     console.log(`User is using existing username: ${storedUsername} (Socket ID: ${socket.id})`);
   });
 
@@ -108,18 +131,24 @@ io.on('connection', (socket) => {
       }
     }
     
+    // Remove old username from online users
+    onlineUsers.delete(socketUsername);
+    
     // Update the socket username
     const oldUsername = socketUsername;
     socketUsername = sanitizedNewUsername;
     
-    // Update username in the socketUsers map
+    // Update username in the socketUsers map and online users
     socketUsers.set(socket.id, sanitizedNewUsername);
+    onlineUsers.add(sanitizedNewUsername);
     
-    // Emit event to confirm the change
+    // Emit events to confirm the change and notify about online status
     socket.emit('username_changed', { 
       oldUsername, 
       newUsername: sanitizedNewUsername 
     });
+    io.emit('user_online', { username: sanitizedNewUsername });
+    io.emit('user_offline', { username: oldUsername });
   });
 
   // Create room
@@ -267,41 +296,45 @@ io.on('connection', (socket) => {
     socket.emit('logout_success');
   });
 
-  // Join room
+  // Handle joining a room
   socket.on('join_room', async (roomId) => {
+    // Leave previous room if any
+    if (currentRoom) {
+      socket.leave(currentRoom);
+      // Remove user from active users in previous room
+      const activeUsers = activeUsersPerRoom.get(currentRoom) || new Set();
+      activeUsers.delete(socketUsername);
+      activeUsersPerRoom.set(currentRoom, activeUsers);
+      // Notify others in the previous room
+      socket.to(currentRoom).emit('user_left', { username: socketUsername });
+      // Update room members for the previous room
+      io.to(currentRoom).emit('room_members', Array.from(activeUsers));
+    }
+
+    // Join new room
     socket.join(roomId);
+    currentRoom = roomId;
     console.log(`User ${socketUsername} joined room ${roomId}`);
-    
+
+    // Add user to active users in new room
+    const activeUsers = activeUsersPerRoom.get(roomId) || new Set();
+    activeUsers.add(socketUsername);
+    activeUsersPerRoom.set(roomId, activeUsers);
+
     // Load previous messages
     const messages = await Message.find({ roomId }).sort({ createdAt: -1 }).limit(50);
     socket.emit('load_messages', messages.reverse());
-    
-    // Update room members for all users in the room
-    updateAndNotifyRoomMembers(roomId);
+
+    // Notify others in the room
+    socket.to(roomId).emit('user_joined', { username: socketUsername });
+    // Update room members for everyone in the room
+    io.to(currentRoom).emit('room_members', Array.from(activeUsers));
   });
 
-  // Function to update and notify room members
-  async function updateAndNotifyRoomMembers(roomId) {
-    try {
-      // Get all sockets in this room
-      const socketsInRoom = await io.in(roomId).fetchSockets();
-      
-      // Extract usernames from socket data
-      const members = socketsInRoom.map(socket => {
-        const memberUsername = socketUsers.get(socket.id);
-        return {
-          id: socket.id,
-          username: memberUsername,
-          isActive: true
-        };
-      });
-      
-      // Send the updated members list to all clients in the room
-      io.to(roomId).emit('room_members', members);
-    } catch (error) {
-      console.error('Error updating room members:', error);
-    }
-  }
+  // Handle get_active_users request
+  socket.on('get_active_users', (roomId) => {
+    socket.emit('active_users', Array.from(onlineUsers));
+  });
 
   // Update room customization
   socket.on('update_room_customization', async (data) => {
@@ -536,27 +569,216 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-    
-    // Get the rooms this socket was in
-    const rooms = Array.from(socket.rooms).filter(room => room !== socket.id);
-    
-    // Update the members list for each room
-    rooms.forEach(roomId => {
-      updateAndNotifyRoomMembers(roomId);
-    });
-    
-    // Keep the username in the map for potential reconnection
-    // socketUsers.delete(socket.id); - We don't delete it to maintain username across reconnection
-    
-    // Set a timeout to clean up if not reconnected within 1 hour
-    setTimeout(() => {
-      if (socketUsers.has(socket.id)) {
-        console.log(`Cleaning up inactive socket: ${socket.id}`);
-        socketUsers.delete(socket.id);
+  // Handle buddy requests
+  socket.on('send_buddy_request', async (data) => {
+    try {
+      const recipientSocketId = userSocketMap.get(data.to);
+      
+      // Store the buddy request in the database
+      const buddyRelation = new BuddyRelation({
+        user1: socketUsername,
+        user2: data.to,
+        status: 'pending',
+        requestedBy: socketUsername
+      });
+      await buddyRelation.save();
+
+      if (recipientSocketId) {
+        // Send the buddy request to the recipient
+        io.to(recipientSocketId).emit('buddy_request', { 
+          from: socketUsername,
+          timestamp: Date.now()
+        });
+        console.log(`Buddy request sent from ${socketUsername} to ${data.to}`);
+      } else {
+        // Even if recipient is offline, request is stored in DB
+        socket.emit('info', { message: 'User is offline but request will be saved' });
       }
-    }, 3600000); // 1 hour
+    } catch (error) {
+      if (error.code === 11000) {
+        // Duplicate key error - request already exists
+        socket.emit('error', { message: 'A buddy request already exists between these users' });
+      } else {
+        console.error('Error sending buddy request:', error);
+        socket.emit('error', { message: 'Failed to send buddy request' });
+      }
+    }
+  });
+
+  // Handle buddy request responses
+  socket.on('buddy_request_response', async (data) => {
+    try {
+      const recipientSocketId = userSocketMap.get(data.to);
+      
+      // Update the buddy relation in the database
+      const buddyRelation = await BuddyRelation.findOne({
+        $or: [
+          { user1: socketUsername, user2: data.to },
+          { user1: data.to, user2: socketUsername }
+        ],
+        status: 'pending'
+      });
+
+      if (!buddyRelation) {
+        return socket.emit('error', { message: 'Buddy request not found' });
+      }
+
+      if (data.accepted) {
+        buddyRelation.status = 'accepted';
+        await buddyRelation.save();
+      } else {
+        await buddyRelation.delete();
+      }
+
+      if (recipientSocketId) {
+        // Send the response to the original requester
+        io.to(recipientSocketId).emit('buddy_request_response', { 
+          from: socketUsername,
+          accepted: data.accepted
+        });
+        console.log(`Buddy request ${data.accepted ? 'accepted' : 'declined'} by ${socketUsername} for ${data.to}`);
+      }
+    } catch (error) {
+      console.error('Error sending buddy request response:', error);
+      socket.emit('error', { message: 'Failed to send buddy request response' });
+    }
+  });
+
+  // Load buddy list and pending requests
+  socket.on('load_buddy_data', async () => {
+    try {
+      // Get accepted buddy relations
+      const acceptedBuddies = await BuddyRelation.find({
+        $or: [
+          { user1: socketUsername },
+          { user2: socketUsername }
+        ],
+        status: 'accepted'
+      });
+
+      // Get pending requests
+      const pendingRequests = await BuddyRelation.find({
+        user2: socketUsername,
+        status: 'pending'
+      });
+
+      socket.emit('buddy_data_loaded', {
+        buddies: acceptedBuddies.map(relation => 
+          relation.user1 === socketUsername ? relation.user2 : relation.user1
+        ),
+        requests: pendingRequests.map(request => ({
+          from: request.user1,
+          timestamp: request.timestamp
+        }))
+      });
+    } catch (error) {
+      console.error('Error loading buddy data:', error);
+      socket.emit('error', { message: 'Failed to load buddy data' });
+    }
+  });
+
+  // Handle direct messages
+  socket.on('send_direct_message', async (data) => {
+    try {
+      const { to, content, textColor, formatting } = data;
+      
+      // Create and save the message in the database
+      const messageData = new DirectMessage({
+        from: socketUsername,
+        to: to,
+        content: sanitizeText(content),
+        textColor: textColor || '#000000',
+        formatting: formatting || {}
+      });
+      await messageData.save();
+
+      // Get recipient's socket ID
+      const recipientSocketId = userSocketMap.get(to);
+      
+      if (recipientSocketId) {
+        // Send to recipient and trigger chat window open
+        io.to(recipientSocketId).emit('receive_direct_message', messageData);
+        io.to(recipientSocketId).emit('open_chat_window', { from: socketUsername });
+        // Send back to sender
+        socket.emit('receive_direct_message', messageData);
+      } else {
+        // If recipient is offline, only send to sender with offline notice
+        messageData.offlineNotice = true;
+        socket.emit('receive_direct_message', messageData);
+      }
+    } catch (error) {
+      console.error('Error sending direct message:', error);
+      socket.emit('error', { message: 'Failed to send direct message' });
+    }
+  });
+
+  // Load chat history
+  socket.on('load_chat_history', async (data) => {
+    try {
+      const { buddy, limit = 50 } = data;
+      
+      // Get messages between these users (in both directions)
+      const messages = await DirectMessage.find({
+        $or: [
+          { from: socketUsername, to: buddy },
+          { from: buddy, to: socketUsername }
+        ]
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+      socket.emit('chat_history_loaded', {
+        buddy,
+        messages: messages.reverse()
+      });
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+      socket.emit('error', { message: 'Failed to load chat history' });
+    }
+  });
+
+  // Handle typing status for direct messages
+  socket.on('buddy_typing_start', (data) => {
+    const recipientSocketId = userSocketMap.get(data.to);
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('buddy_typing', { 
+        username: socketUsername,
+        isTyping: true 
+      });
+    }
+  });
+
+  socket.on('buddy_typing_stop', (data) => {
+    const recipientSocketId = userSocketMap.get(data.to);
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('buddy_typing', { 
+        username: socketUsername,
+        isTyping: false 
+      });
+    }
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    
+    // Remove user from all mappings
+    onlineUsers.delete(socketUsername);
+    userSocketMap.delete(socketUsername);
+    io.emit('user_offline', { username: socketUsername });
+    
+    if (currentRoom) {
+      // Remove user from active users in their room
+      const activeUsers = activeUsersPerRoom.get(currentRoom) || new Set();
+      activeUsers.delete(socketUsername);
+      activeUsersPerRoom.set(currentRoom, activeUsers);
+      // Notify others in the room
+      io.to(currentRoom).emit('user_left', { username: socketUsername });
+      // Update room members
+      io.to(currentRoom).emit('room_members', Array.from(activeUsers));
+    }
+    
+    socketUsers.delete(socket.id);
   });
 });
 

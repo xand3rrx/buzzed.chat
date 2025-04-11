@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import LandingPage from './components/LandingPage';
@@ -7,6 +7,7 @@ import YahooLogin from './components/YahooLogin';
 import RegisterPage from './components/RegisterPage';
 import SocketDebugger from './components/SocketDebugger';
 import { io } from 'socket.io-client';
+import BuddyChatManager from './components/BuddyChatManager';
 
 // Use environment variable with fallback to localhost for development
 const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
@@ -78,6 +79,7 @@ const theme = createTheme({
 function App() {
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [showDebugger, setShowDebugger] = useState(false); // State to toggle debugger
+  const buddyChatManagerRef = useRef();
 
   useEffect(() => {
     // Socket connection event handlers
@@ -168,7 +170,16 @@ function App() {
               path="/room/:roomId" 
               element={
                 <ProtectedRoute>
-                  <ChatRoom socket={socket} />
+                  <>
+                    <ChatRoom 
+                      socket={socket} 
+                      buddyChatManagerRef={buddyChatManagerRef}
+                    />
+                    <BuddyChatManager
+                      ref={buddyChatManagerRef}
+                      socket={socket}
+                    />
+                  </>
                 </ProtectedRoute>
               } 
             />

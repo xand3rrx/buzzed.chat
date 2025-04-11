@@ -43,6 +43,8 @@ import RoomCustomizationPanel from './RoomCustomizationPanel';
 import MentionsPopup from './MentionsPopup.jsx';
 import { styled, useTheme } from '@mui/material/styles';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import BuddyChatManager from './BuddyChatManager';
+import BuddyRequests from './BuddyRequests';
 
 // Use environment variable with fallback to localhost for development
 const SOCKET_SERVER = process.env.REACT_APP_SOCKET_SERVER || 'http://localhost:5000';
@@ -211,7 +213,7 @@ const TEXT_COLORS = [
   { name: 'Teal', value: '#008080' },
 ];
 
-function ChatRoom() {
+function ChatRoom({ socket, buddyChatManagerRef }) {
   const navigate = useNavigate();
   const { roomId } = useParams();
   const [room, setRoom] = useState(null);
@@ -239,6 +241,11 @@ function ChatRoom() {
   const openNotificationsMenu = Boolean(anchorEl);
   const [roomUsers, setRoomUsers] = useState([]);
   const [currentTab, setCurrentTab] = useState(0);
+  const [buddyList, setBuddyList] = useState([]);
+  const [buddyRequests, setBuddyRequests] = useState([]);
+  const [activeBuddyChats, setActiveBuddyChats] = useState(new Set());
+  const [buddyMenuAnchor, setBuddyMenuAnchor] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
   const [textFormat, setTextFormat] = useState({
     bold: false,
     italic: false,
@@ -251,7 +258,8 @@ function ChatRoom() {
   const [showLeftSidebar, setShowLeftSidebar] = useState(true);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
   const [customizationPanelOpen, setCustomizationPanelOpen] = useState(false);
-  
+  const [contextMenu, setContextMenu] = useState(null);
+
   useEffect(() => {
     // Add retro fonts
     const link = document.createElement('link');
@@ -474,12 +482,48 @@ function ChatRoom() {
     // Handle room members list
     socket.on('room_members', (membersList) => {
       setRoomUsers(membersList.map(member => ({
-        id: member.id || Date.now() + Math.random(),
-        username: member.username,
-        color: getUsernameColor(member.username),
-        isActive: member.isActive || true
+        id: member.id || `${Date.now()}-${Math.random()}`,
+        username: member.username || member,
+        color: getUsernameColor(member.username || member),
+        isActive: activeUsers.has(member.username || member)
       })));
     });
+
+    // Add handlers for user activity
+    socket.on('user_joined', (data) => {
+      setActiveUsers(prev => new Set([...prev, data.username]));
+      // Add system message for user joining
+      setMessages(prev => [...prev, {
+        _id: Date.now().toString(),
+        username: 'System',
+        content: `${data.username} has joined the room`,
+        createdAt: new Date().toISOString(),
+        isSystemMessage: true
+      }]);
+    });
+
+    socket.on('user_left', (data) => {
+      setActiveUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(data.username);
+        return newSet;
+      });
+      // Add system message for user leaving
+      setMessages(prev => [...prev, {
+        _id: Date.now().toString(),
+        username: 'System',
+        content: `${data.username} has left the room`,
+        createdAt: new Date().toISOString(),
+        isSystemMessage: true
+      }]);
+    });
+
+    socket.on('active_users', (activeUsersList) => {
+      setActiveUsers(new Set(activeUsersList));
+    });
+
+    // Request active users list when joining room
+    socket.emit('get_active_users', roomId);
 
     // Handle available rooms list
     socket.on('rooms_list', (roomsList) => {
@@ -548,6 +592,88 @@ function ChatRoom() {
     // Make sure to scroll to bottom when dependencies change
     setTimeout(scrollToBottom, 500);
 
+    // Load buddy requests from localStorage
+    const storedRequests = JSON.parse(localStorage.getItem('buddyRequests') || '[]');
+    console.log('Loading stored buddy requests:', storedRequests);
+    setBuddyRequests(storedRequests);
+
+    // Load buddy data from server
+    socket.emit('load_buddy_data');
+
+    // Listen for buddy data loaded
+    socket.on('buddy_data_loaded', (data) => {
+      console.log('Buddy data loaded:', data);
+      setBuddyList(data.buddies);
+      setBuddyRequests(data.requests);
+      // Store in localStorage for persistence
+      localStorage.setItem('chatBuddies', JSON.stringify(data.buddies));
+      localStorage.setItem('buddyRequests', JSON.stringify(data.requests));
+    });
+
+    // Listen for buddy requests
+    socket.on('buddy_request', (data) => {
+      console.log('Received buddy request:', data);
+      setBuddyRequests(prev => {
+        const newRequests = [...prev, { from: data.from, timestamp: data.timestamp }];
+        localStorage.setItem('buddyRequests', JSON.stringify(newRequests));
+        return newRequests;
+      });
+      // Add notification
+      setNotifications(prev => [{
+        id: Date.now(),
+        message: `${data.from} wants to add you as a buddy`,
+        content: 'Click to view buddy requests',
+        timestamp: Date.now(),
+        type: 'buddy_request'
+      }, ...prev]);
+      setNotificationCount(prev => prev + 1);
+    });
+
+    // Listen for buddy request responses
+    socket.on('buddy_request_response', (data) => {
+      if (data.accepted) {
+        setBuddyList(prev => {
+          const newBuddyList = [...prev, data.from];
+          localStorage.setItem('chatBuddies', JSON.stringify(newBuddyList));
+          return newBuddyList;
+        });
+        
+        // Add system message
+        setMessages(prev => [...prev, {
+          _id: Date.now().toString(),
+          username: 'System',
+          content: `${data.from} accepted your buddy request`,
+          createdAt: new Date().toISOString(),
+          isSystemMessage: true,
+          onlyVisibleTo: username
+        }]);
+      } else {
+        // Add system message for rejection
+        setMessages(prev => [...prev, {
+          _id: Date.now().toString(),
+          username: 'System',
+          content: `${data.from} declined your buddy request`,
+          createdAt: new Date().toISOString(),
+          isSystemMessage: true,
+          onlyVisibleTo: username
+        }]);
+      }
+    });
+
+    // Listen for chat window open requests
+    socket.on('open_chat_window', (data) => {
+      if (buddyChatManagerRef.current) {
+        buddyChatManagerRef.current.openChat(data.from);
+      }
+    });
+
+    // Listen for chat history loaded
+    socket.on('chat_history_loaded', (data) => {
+      if (buddyChatManagerRef.current) {
+        buddyChatManagerRef.current.loadChatHistory(data.buddy, data.messages);
+      }
+    });
+
     return () => {
       socket.off('username_assigned');
       socket.off('load_messages');
@@ -565,9 +691,19 @@ function ChatRoom() {
       socket.off('rooms_list');
       socket.off('room_deleted');
       socket.off('delete_room_response');
+      socket.off('user_joined');
+      socket.off('user_left');
+      socket.off('active_users');
+      socket.off('buddy_request');
+      socket.off('buddy_request_response');
+      socket.off('buddy_typing');
+      socket.off('receive_direct_message');
+      socket.off('buddy_data_loaded');
+      socket.off('open_chat_window');
+      socket.off('chat_history_loaded');
       document.head.removeChild(link);
     };
-  }, [roomId, username]);
+  }, [roomId, username, socket, buddyChatManagerRef]);
 
   // Updated scroll function with forced layout
   const scrollToBottom = () => {
@@ -1008,6 +1144,326 @@ function ChatRoom() {
     handleMentionSearch(newMessage);
   }, [newMessage, roomUsers]);
   
+  // Add buddy system handlers
+  const handleAddBuddy = (buddyUsername) => {
+    if (buddyUsername !== username && !buddyList.includes(buddyUsername)) {
+      socket.emit('send_buddy_request', { to: buddyUsername });
+      
+      // Add system message
+      setMessages(prev => [...prev, {
+        _id: Date.now().toString(),
+        username: 'System',
+        content: `Buddy request sent to ${buddyUsername}`,
+        createdAt: new Date().toISOString(),
+        isSystemMessage: true,
+        onlyVisibleTo: username
+      }]);
+    }
+  };
+
+  const handleRemoveBuddy = (buddyUsername) => {
+    const newBuddyList = buddyList.filter(buddy => buddy !== buddyUsername);
+    setBuddyList(newBuddyList);
+    localStorage.setItem('chatBuddies', JSON.stringify(newBuddyList));
+    
+    // Add system message
+    setMessages(prev => [...prev, {
+      _id: Date.now().toString(),
+      username: 'System',
+      content: `Removed ${buddyUsername} from your buddy list`,
+      createdAt: new Date().toISOString(),
+      isSystemMessage: true,
+      onlyVisibleTo: username
+    }]);
+  };
+
+  const handleUserClick = (event, clickedUsername) => {
+    if (clickedUsername === username) return;
+    setSelectedUser(clickedUsername);
+    setBuddyMenuAnchor(event.currentTarget);
+  };
+
+  const handleCloseBuddyMenu = () => {
+    setBuddyMenuAnchor(null);
+    setSelectedUser(null);
+  };
+
+  // Handle buddy request actions
+  const handleAcceptBuddy = (requesterUsername) => {
+    socket.emit('buddy_request_response', { to: requesterUsername, accepted: true });
+    const newBuddyList = [...buddyList, requesterUsername];
+    setBuddyList(newBuddyList);
+    localStorage.setItem('chatBuddies', JSON.stringify(newBuddyList));
+    
+    // Remove the request
+    setBuddyRequests(prev => {
+      const newRequests = prev.filter(req => req.from !== requesterUsername);
+      localStorage.setItem('buddyRequests', JSON.stringify(newRequests));
+      return newRequests;
+    });
+
+    // Add system message
+    setMessages(prev => [...prev, {
+      _id: Date.now().toString(),
+      username: 'System',
+      content: `You accepted ${requesterUsername}'s buddy request`,
+      createdAt: new Date().toISOString(),
+      isSystemMessage: true,
+      onlyVisibleTo: username
+    }]);
+  };
+
+  const handleDenyBuddy = (requesterUsername) => {
+    socket.emit('buddy_request_response', { to: requesterUsername, accepted: false });
+    
+    // Remove the request
+    setBuddyRequests(prev => {
+      const newRequests = prev.filter(req => req.from !== requesterUsername);
+      localStorage.setItem('buddyRequests', JSON.stringify(newRequests));
+      return newRequests;
+    });
+
+    // Add system message
+    setMessages(prev => [...prev, {
+      _id: Date.now().toString(),
+      username: 'System',
+      content: `You declined ${requesterUsername}'s buddy request`,
+      createdAt: new Date().toISOString(),
+      isSystemMessage: true,
+      onlyVisibleTo: username
+    }]);
+  };
+
+  const renderMessage = (message) => {
+    // Skip messages that are only visible to specific users if not the intended recipient
+    if (message.onlyVisibleTo && message.onlyVisibleTo !== username) {
+      return null;
+    }
+
+    // Determine if it's the current user's message
+    const isCurrentUser = message.username === username;
+
+    return (
+      <Box 
+        id={`message-${message._id}`}
+        key={message._id} 
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          mb: 1,
+          px: 0.5,
+          py: 0.5,
+          width: '100%',
+          '&:hover': {
+            backgroundColor: 'rgba(0, 0, 0, 0.03)',
+            '& .message-actions': {
+              visibility: 'visible',
+            }
+          },
+          ...(message.isSystemMessage && {
+            color: '#808080',
+            fontStyle: 'italic',
+            fontFamily: '"Tahoma", sans-serif',
+            px: 2,
+            textAlign: 'center',
+            fontSize: '11px',
+          }),
+        }}
+      >
+        {/* If message is a reply, show the replied message */}
+        {message.replyTo && (
+          <Box
+            sx={{
+              ml: 4,
+              mb: 0.5,
+              backgroundColor: '#f5f5f5',
+              borderRadius: '0',
+              position: 'relative',
+              borderLeft: '2px solid #a5bedc',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              py: 0.25,
+              pl: 1,
+              pr: 2,
+              fontSize: '11px',
+              fontFamily: '"Tahoma", sans-serif',
+            }}
+          >
+            <ReplyIcon sx={{ fontSize: '11px', color: '#6699cc', mr: 0.5 }} />
+            <Typography 
+              component="span" 
+              sx={{ 
+                fontSize: '11px',
+                color: '#800000',
+                fontWeight: 'bold',
+                mr: 0.75,
+                fontFamily: '"Tahoma", sans-serif',
+                cursor: 'pointer',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+              onClick={(e) => handleUserClick(e, message.replyTo.username)}
+            >
+              {message.replyTo.username}
+            </Typography>
+            <Typography
+              sx={{
+                fontSize: '11px',
+                color: '#444444',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+                fontFamily: '"Tahoma", sans-serif',
+              }}
+            >
+              {message.replyTo.content}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Message with Buzzed! Messenger style */}
+        {!message.isSystemMessage ? (
+          <Box sx={{ 
+            display: 'flex',
+            alignItems: 'flex-start',
+          }}>
+            <Typography 
+              component="span" 
+              sx={{ 
+                color: '#9a9a9a',
+                fontSize: '10px',
+                minWidth: '40px',
+                mr: 1,
+                fontFamily: '"Tahoma", sans-serif',
+              }}
+            >
+              {message.createdAt ? formatTime(message.createdAt) : '--:--'}
+            </Typography>
+            
+            <Typography 
+              component="span" 
+              onClick={(e) => handleUserClick(e, message.username)}
+              sx={{ 
+                color: '#800000',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                mr: 0.5,
+                fontFamily: '"Tahoma", sans-serif',
+                cursor: 'pointer',
+                '&:hover': {
+                  textDecoration: 'underline',
+                },
+              }}
+            >
+              {message.username}:
+            </Typography>
+            
+            <Typography 
+              component="span" 
+              sx={{ 
+                color: message.textColor || '#000000',
+                wordBreak: 'break-word',
+                fontSize: '12px',
+                fontFamily: '"Tahoma", sans-serif',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                flex: 1,
+                ...(message.onlyVisibleTo && {
+                  fontStyle: 'italic',
+                  color: '#666666',
+                }),
+                ...(message.isDeleted && {
+                  fontStyle: 'italic',
+                  color: '#999999',
+                }),
+              }}
+            >
+              {message.isDeleted ? (
+                <span>{message.content}</span>
+              ) : (
+                <span>{applyFormatting(message)}</span>
+              )}
+              <Box 
+                className="message-actions"
+                sx={{ 
+                  visibility: 'hidden',
+                  display: 'flex',
+                  gap: 0.5,
+                  ml: 1,
+                }}
+              >
+                {!message.isDeleted && (
+                  <Tooltip title="Reply">
+                    <IconButton
+                      onClick={() => handleReply(message)}
+                      size="small"
+                      sx={{
+                        padding: '2px',
+                        color: '#000080',
+                        bgcolor: '#f0f0f0',
+                        border: '1px solid #d0d0d0',
+                        '&:hover': {
+                          bgcolor: '#ffffff',
+                          border: '1px solid #a0a0a0',
+                        },
+                        '.MuiSvgIcon-root': {
+                          fontSize: '12px',
+                        },
+                      }}
+                    >
+                      <ReplyIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {(isRoomOwner || username === 'xand3rr') && !message.isDeleted && message.username !== 'System' && (
+                  <Tooltip title={username === 'xand3rr' ? "Admin Delete" : "Delete Message"}>
+                    <IconButton
+                      onClick={() => {
+                        socket.emit('delete_message', { roomId, messageId: message._id });
+                      }}
+                      size="small"
+                      sx={{
+                        padding: '2px',
+                        color: username === 'xand3rr' ? '#0000CC' : '#800000',
+                        bgcolor: '#f0f0f0',
+                        border: '1px solid #d0d0d0',
+                        '&:hover': {
+                          bgcolor: '#ffffff',
+                          border: '1px solid #a0a0a0',
+                        },
+                        '.MuiSvgIcon-root': {
+                          fontSize: '12px',
+                        },
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+            </Typography>
+          </Box>
+        ) : (
+          <Typography 
+            sx={{ 
+              color: '#666666',
+              fontSize: '11px',
+              fontStyle: 'italic',
+              fontFamily: '"Tahoma", sans-serif',
+              textAlign: 'center',
+            }}
+          >
+            {message.content}
+          </Typography>
+        )}
+      </Box>
+    );
+  };
+
   if (loading || switchingRoom) {
     return (
       <Box
@@ -2056,225 +2512,7 @@ function ChatRoom() {
               borderTop: '1px solid #7b9ebd',
             }}
           >
-            {messages.map((message, index) => {
-              // Skip messages that are only visible to other users
-              if (message.onlyVisibleTo && message.onlyVisibleTo !== username) {
-                return null;
-              }
-              
-              // Determine if it's the current user's message
-              const isCurrentUser = message.username === username;
-            
-              return (
-                <Box 
-                  id={`message-${message._id}`}
-                  key={message._id} 
-                  sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    mb: 1,
-                    px: 0.5,
-                    py: 0.5,
-                    width: '100%',
-                    '&:hover': {
-                      backgroundColor: 'rgba(0, 0, 0, 0.03)',
-                      '& .message-actions': {
-                        visibility: 'visible',
-                      }
-                    },
-                    ...(message.isSystemMessage && {
-                      color: '#808080',
-                      fontStyle: 'italic',
-                      fontFamily: '"Tahoma", sans-serif',
-                      px: 2,
-                      textAlign: 'center',
-                      fontSize: '11px',
-                    }),
-                  }}
-                >
-                  {/* If message is a reply, show the replied message */}
-                  {message.replyTo && (
-                    <Box
-                      sx={{
-                        ml: 4,
-                        mb: 0.5,
-                        backgroundColor: '#f5f5f5',
-                        borderRadius: '0',
-                        position: 'relative',
-                        borderLeft: '2px solid #a5bedc',
-                        overflow: 'hidden',
-                        display: 'flex',
-                        alignItems: 'center',
-                        py: 0.25,
-                        pl: 1,
-                        pr: 2,
-                        fontSize: '11px',
-                        fontFamily: '"Tahoma", sans-serif',
-                      }}
-                    >
-                      <ReplyIcon sx={{ fontSize: '11px', color: '#6699cc', mr: 0.5 }} />
-                      <Typography 
-                        component="span" 
-                        sx={{ 
-                          fontSize: '11px',
-                          color: '#800000',
-                          fontWeight: 'bold',
-                          mr: 0.75,
-                          fontFamily: '"Tahoma", sans-serif',
-                        }}
-                      >
-                        {message.replyTo.username}
-                      </Typography>
-                      <Typography
-                        sx={{
-                          fontSize: '11px',
-                          color: '#444444',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          flex: 1,
-                          fontFamily: '"Tahoma", sans-serif',
-                        }}
-                      >
-                        {message.replyTo.content}
-                      </Typography>
-                    </Box>
-                  )}
-
-                  {/* Message with Buzzed! Messenger style */}
-                  {!message.isSystemMessage ? (
-                    <Box sx={{ 
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                    }}>
-                      <Typography 
-                        component="span" 
-                        sx={{ 
-                          color: '#9a9a9a',
-                          fontSize: '10px',
-                          minWidth: '40px',
-                          mr: 1,
-                          fontFamily: '"Tahoma", sans-serif',
-                        }}
-                      >
-                        {message.createdAt ? formatTime(message.createdAt) : '--:--'}
-                      </Typography>
-                      
-                      <Typography 
-                        component="span" 
-                        sx={{ 
-                          color: '#800000',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          mr: 0.5,
-                          fontFamily: '"Tahoma", sans-serif',
-                        }}
-                      >
-                        {message.username}:
-                      </Typography>
-                      
-                      <Typography 
-                        component="span" 
-                        sx={{ 
-                          color: message.textColor || '#000000',
-                          wordBreak: 'break-word',
-                          fontSize: '12px',
-                          fontFamily: '"Tahoma", sans-serif',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          flex: 1,
-                          ...(message.onlyVisibleTo && {
-                            fontStyle: 'italic',
-                            color: '#666666',
-                          }),
-                          ...(message.isDeleted && {
-                            fontStyle: 'italic',
-                            color: '#999999',
-                          }),
-                        }}
-                      >
-                        {message.isDeleted ? (
-                          <span>{message.content}</span>
-                        ) : (
-                          <span>{applyFormatting(message)}</span>
-                        )}
-                        <Box 
-                          className="message-actions"
-                          sx={{ 
-                            visibility: 'hidden',
-                            display: 'flex',
-                            gap: 0.5,
-                            ml: 1,
-                          }}
-                        >
-                          {!message.isDeleted && (
-                            <Tooltip title="Reply">
-                              <IconButton
-                                onClick={() => handleReply(message)}
-                                size="small"
-                                sx={{
-                                  padding: '2px',
-                                  color: '#000080',
-                                  bgcolor: '#f0f0f0',
-                                  border: '1px solid #d0d0d0',
-                                  '&:hover': {
-                                    bgcolor: '#ffffff',
-                                    border: '1px solid #a0a0a0',
-                                  },
-                                  '.MuiSvgIcon-root': {
-                                    fontSize: '12px',
-                                  },
-                                }}
-                              >
-                                <ReplyIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                          {(isRoomOwner || username === 'xand3rr') && !message.isDeleted && message.username !== 'System' && (
-                            <Tooltip title={username === 'xand3rr' ? "Admin Delete" : "Delete Message"}>
-                              <IconButton
-                                onClick={() => {
-                                  socket.emit('delete_message', { roomId, messageId: message._id });
-                                }}
-                                size="small"
-                                sx={{
-                                  padding: '2px',
-                                  color: username === 'xand3rr' ? '#0000CC' : '#800000',
-                                  bgcolor: '#f0f0f0',
-                                  border: '1px solid #d0d0d0',
-                                  '&:hover': {
-                                    bgcolor: '#ffffff',
-                                    border: '1px solid #a0a0a0',
-                                  },
-                                  '.MuiSvgIcon-root': {
-                                    fontSize: '12px',
-                                  },
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                        </Box>
-                      </Typography>
-                    </Box>
-                  ) : (
-                    <Typography 
-                      sx={{ 
-                        color: '#666666',
-                        fontSize: '11px',
-                        fontStyle: 'italic',
-                        fontFamily: '"Tahoma", sans-serif',
-                        textAlign: 'center',
-                      }}
-                    >
-                      {message.content}
-                    </Typography>
-                  )}
-                </Box>
-              );
-            })}
+            {messages.map((message) => renderMessage(message))}
             <div ref={messagesEndRef} />
           </Box>
 
@@ -2708,7 +2946,7 @@ function ChatRoom() {
           </Box>
         </Box>
         
-        {/* Right Sidebar - Room Members */}
+        {/* Right Sidebar - Room Members and Buddies */}
         {showRightSidebar && (
           <Box
             sx={{
@@ -2721,139 +2959,318 @@ function ChatRoom() {
               backgroundColor: '#f7eefb',
             }}
           >
-            <Box 
-              sx={{ 
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
-                color: '#fff',
-                height: '24px',
-                px: 1,
-                userSelect: 'none',
-              }}
-            >
-              <Typography 
+            {/* Room Members Section */}
+            <Box sx={{ height: '50%', display: 'flex', flexDirection: 'column' }}>
+              <Box 
                 sx={{ 
-                  fontSize: '12px', 
-                  fontWeight: 'bold',
-                  fontFamily: '"Tahoma", sans-serif',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                  color: '#fff',
+                  height: '24px',
+                  px: 1,
+                  userSelect: 'none',
                 }}
               >
-                Room Members ({roomUsers.length})
-              </Typography>
-            </Box>
-            
-            <Box sx={{ 
-              flex: 1, 
-              overflowY: 'auto',
-              '&::-webkit-scrollbar': {
-                width: '8px',
-              },
-              '&::-webkit-scrollbar-track': {
-                background: '#f0e5f5',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                background: 'linear-gradient(to right, #b57ad9 0%, #9e56b6 100%)',
-                borderRadius: '4px',
-              },
-            }}>
-              <List dense disablePadding>
-                {roomUsers.map((user) => (
-                  <ListItem 
-                    key={user.id || user.username}
-                    sx={{ 
-                      borderBottom: '1px solid #e0e0e0',
-                      py: 0.75,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        width: '100%',
+                <Typography 
+                  sx={{ 
+                    fontSize: '12px', 
+                    fontWeight: 'bold',
+                    fontFamily: '"Tahoma", sans-serif',
+                  }}
+                >
+                  Room Members ({roomUsers.length})
+                </Typography>
+              </Box>
+              
+              <Box sx={{ 
+                flex: 1, 
+                overflowY: 'auto',
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: '#f0e5f5',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: 'linear-gradient(to right, #b57ad9 0%, #9e56b6 100%)',
+                  borderRadius: '4px',
+                },
+              }}>
+                <List dense disablePadding>
+                  {roomUsers.map((user) => (
+                    <ListItem 
+                      key={user.id || user.username}
+                      sx={{ 
+                        borderBottom: '1px solid #e0e0e0',
+                        py: 0.75,
                       }}
                     >
                       <Box
                         sx={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          bgcolor: user.isActive ? '#4caf50' : '#f44336',
-                          mr: 1.5,
-                          ml: 1,
-                          border: '1px solid',
-                          borderColor: user.isActive ? '#006600' : '#aa0000',
+                          display: 'flex',
+                          alignItems: 'center',
+                          width: '100%',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            '& .username': {
+                              textDecoration: 'underline',
+                            }
+                          }
                         }}
-                      />
-                      <Typography
-                        sx={{
-                          fontSize: '13px',
-                          fontFamily: 'Tahoma',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: '#000000',
-                        }}
+                        onClick={(e) => handleUserClick(e, user.username)}
                       >
-                        {user.username}
-                        {user.username === username && (
-                          <Typography
-                            component="span"
-                            sx={{
-                              fontSize: '10px',
-                              color: '#006600',
-                              fontFamily: 'Tahoma',
-                              ml: 0.5,
-                            }}
-                          >
-                            (You)
-                          </Typography>
-                        )}
-                      </Typography>
-                    </Box>
-                  </ListItem>
-                ))}
-              </List>
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            bgcolor: activeUsers.has(user.username) ? '#4caf50' : '#f44336',
+                            mr: 1.5,
+                            ml: 1,
+                            border: '1px solid',
+                            borderColor: activeUsers.has(user.username) ? '#006600' : '#aa0000',
+                          }}
+                        />
+                        <Typography
+                          className="username"
+                          sx={{
+                            fontSize: '13px',
+                            fontFamily: 'Tahoma',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: '#000000',
+                          }}
+                        >
+                          {user.username}
+                          {user.username === username && (
+                            <Typography
+                              component="span"
+                              sx={{
+                                fontSize: '10px',
+                                color: '#006600',
+                                fontFamily: 'Tahoma',
+                                ml: 0.5,
+                              }}
+                            >
+                              (You)
+                            </Typography>
+                          )}
+                        </Typography>
+                      </Box>
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
             </Box>
-            
-            {isRoomOwner && (
+
+            {/* Buddies Section */}
+            <Box sx={{ height: '50%', display: 'flex', flexDirection: 'column', borderTop: '1px solid #770094' }}>
               <Box 
                 sx={{ 
                   display: 'flex',
-                  justifyContent: 'center',
-                  padding: '8px',
-                  borderTop: '1px solid #b57ad9', 
-                  backgroundColor: '#f2e9f7',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'linear-gradient(to bottom, #a33ebd 0%, #770094 100%)',
+                  color: '#fff',
+                  height: '24px',
+                  px: 1,
+                  userSelect: 'none',
                 }}
               >
-                <Box 
-                  component="button"
-                  onClick={() => setCustomizationPanelOpen(true)}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'linear-gradient(to bottom, #ffffff 0%, #f0e5f5 100%)',
-                    border: '1px solid #9e56b6',
-                    borderRadius: '3px',
-                    width: '100%',
-                    py: 0.5,
-                    fontSize: '12px',
-                    fontFamily: '"Tahoma", sans-serif',
-                    color: '#000',
-                    cursor: 'pointer',
-                    '&:hover': {
-                      background: 'linear-gradient(to bottom, #ffffff 0%, #f0f0f0 100%)',
-                    },
-                  }}
-                >
-                  Manage Room
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography 
+                    sx={{ 
+                      fontSize: '12px', 
+                      fontWeight: 'bold',
+                      fontFamily: '"Tahoma", sans-serif',
+                    }}
+                  >
+                    Buddies ({buddyList.length})
+                  </Typography>
+                  {buddyRequests.length > 0 && (
+                    <Box
+                      sx={{
+                        backgroundColor: '#ff3300',
+                        color: '#ffffff',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        padding: '0 4px',
+                        borderRadius: '8px',
+                        minWidth: '16px',
+                        height: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontFamily: '"Tahoma", sans-serif',
+                      }}
+                    >
+                      {buddyRequests.length}
+                    </Box>
+                  )}
                 </Box>
               </Box>
-            )}
+              
+              {/* Buddy Requests Section */}
+              <BuddyRequests
+                requests={buddyRequests}
+                onAccept={handleAcceptBuddy}
+                onDeny={handleDenyBuddy}
+              />
+              
+              {/* Buddies List */}
+              <Box sx={{ 
+                flex: 1, 
+                overflowY: 'auto',
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: '#f0e5f5',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: 'linear-gradient(to right, #b57ad9 0%, #9e56b6 100%)',
+                  borderRadius: '4px',
+                },
+              }}>
+                <List dense disablePadding>
+                  {buddyList.map((buddy) => (
+                    <ListItem 
+                      key={buddy}
+                      disablePadding
+                      sx={{
+                        py: 0.25,
+                        '&:hover': {
+                          backgroundColor: '#f0e5f5',
+                        }
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          width: '100%',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            '& .username': {
+                              textDecoration: 'underline',
+                            }
+                          }
+                        }}
+                        onClick={() => buddyChatManagerRef.current?.openChat(buddy)}
+                      >
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            bgcolor: activeUsers.has(buddy) ? '#4caf50' : '#f44336',
+                            mr: 1.5,
+                            ml: 1,
+                            border: '1px solid',
+                            borderColor: activeUsers.has(buddy) ? '#006600' : '#aa0000',
+                          }}
+                        />
+                        <Typography
+                          className="username"
+                          sx={{
+                            fontSize: '13px',
+                            fontFamily: 'Tahoma',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: '#000000',
+                            flex: 1,
+                          }}
+                        >
+                          {buddy}
+                        </Typography>
+                        <IconButton
+                          edge="end"
+                          aria-label="remove buddy"
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveBuddy(buddy);
+                          }}
+                          sx={{ 
+                            padding: '2px',
+                            mr: 0.5,
+                            '&:hover': { 
+                              color: '#ff0000',
+                              backgroundColor: 'transparent',
+                            }
+                          }}
+                        >
+                          <CloseIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Box>
+                    </ListItem>
+                  ))}
+                  {buddyList.length === 0 && (
+                    <ListItem sx={{ py: 1 }}>
+                      <Typography
+                        sx={{
+                          fontSize: '12px',
+                          fontFamily: '"Tahoma", sans-serif',
+                          color: '#666666',
+                          textAlign: 'center',
+                          width: '100%',
+                          fontStyle: 'italic',
+                        }}
+                      >
+                        No buddies added yet
+                      </Typography>
+                    </ListItem>
+                  )}
+                </List>
+              </Box>
+            </Box>
           </Box>
         )}
+
+        {/* Buddy Menu */}
+        <Menu
+          anchorEl={buddyMenuAnchor}
+          open={Boolean(buddyMenuAnchor)}
+          onClose={handleCloseBuddyMenu}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'left',
+          }}
+        >
+          {selectedUser && !buddyList.includes(selectedUser) && (
+            <MenuItem
+              onClick={() => {
+                handleAddBuddy(selectedUser);
+                handleCloseBuddyMenu();
+              }}
+              sx={{
+                fontSize: '12px',
+                fontFamily: '"Tahoma", sans-serif',
+              }}
+            >
+              Add to Buddies
+            </MenuItem>
+          )}
+          {selectedUser && buddyList.includes(selectedUser) && (
+            <MenuItem
+              onClick={() => {
+                handleRemoveBuddy(selectedUser);
+                handleCloseBuddyMenu();
+              }}
+              sx={{
+                fontSize: '12px',
+                fontFamily: '"Tahoma", sans-serif',
+                color: '#ff0000',
+              }}
+            >
+              Remove from Buddies
+            </MenuItem>
+          )}
+        </Menu>
       </Box>
 
       {/* Notification Menu with Buzzed! Messenger Style */}
@@ -2974,6 +3391,14 @@ function ChatRoom() {
           setDialogOpen={setCustomizationPanelOpen}
         />
       )}
+
+      {/* Buddy Chat Windows */}
+      <BuddyChatManager
+        ref={buddyChatManagerRef}
+        socket={socket}
+        username={username}
+        buddyList={buddyList}
+      />
     </Box>
   );
 }
